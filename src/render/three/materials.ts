@@ -8,8 +8,8 @@ export interface MaterialOptions {
 export function createFr4Material(opts: MaterialOptions = {}): THREE.Material {
   const mat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(0x2f4030),
-    metalness: 0.0,
-    roughness: 0.9,
+    metalness: 0.2,
+    roughness: 0.5,
   });
   return mat;
 }
@@ -22,15 +22,18 @@ export function createCopperMaterial(
     color: new THREE.Color(0xd8af3a),
     metalness: 1.0,
     roughness: 0.35,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1
   });
 
-  // You could tint top vs bottom differently if you want
   if (side === "bottom") {
     (mat as THREE.MeshStandardMaterial).color.offsetHSL(0, 0, -0.05);
   }
 
   return mat;
 }
+
 
 export function createSoldermaskMaterial(
   side: "top" | "bottom",
@@ -42,6 +45,9 @@ export function createSoldermaskMaterial(
     roughness: 0.8,
     transparent: true,
     opacity: 0.85,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1
   });
 
   if (side === "bottom") {

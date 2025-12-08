@@ -17,18 +17,26 @@ type PolygonCoords = Ring[];
 type MultiPolygonCoords = PolygonCoords[];
 
 /**
- * Convert our Polygon to Martinez PolygonCoords
+ * Convert our Polygon to Martinez PolygonCoords.
+ * Returns null if the polygon is too small / invalid.
  */
-function polygonToMartinez(poly: Polygon): PolygonCoords {
+function polygonToMartinez(poly: Polygon): PolygonCoords | null {
+  if (!poly.outer || poly.outer.length < 3) return null;
+
   const outer: Ring = poly.outer.map(p => [p.x, p.y]);
-  const holes: Ring[] = (poly.holes || []).map(hole =>
-    hole.map(p => [p.x, p.y])
-  );
+  if (outer.length < 3) return null;
+
+  const holes: Ring[] = (poly.holes || [])
+    .filter(h => h && h.length >= 3)
+    .map(hole => hole.map(p => [p.x, p.y]));
+
   return [outer, ...holes];
 }
 
+
 /**
- * Convert Martinez MultiPolygon or PolygonCoords to our Polygon[]
+ * Convert Martinez MultiPolygon or PolygonCoords to our Polygon[].
+ * Very defensive: if shape looks weird, we skip it.
  */
 function martinezToPolygons(
   result: MultiPolygonCoords | PolygonCoords | null | undefined
@@ -37,28 +45,43 @@ function martinezToPolygons(
 
   let multi: MultiPolygonCoords;
 
-  // Distinguish between PolygonCoords and MultiPolygonCoords by checking the nesting depth.
-  // PolygonCoords: ring -> point -> coord
-  // MultiPolygonCoords: polygon -> ring -> point -> coord
-  if (Array.isArray(result[0]) && Array.isArray((result as any)[0][0]) && !Array.isArray((result as any)[0][0][0])) {
-    // This is PolygonCoords (result[0][0][0] is number)
+  // Heuristic to distinguish PolygonCoords vs MultiPolygonCoords
+  // PolygonCoords: ring -> point -> number
+  // MultiPolygonCoords: polygon -> ring -> point -> number
+  const r: any = result;
+
+  if (
+    Array.isArray(r) &&
+    Array.isArray(r[0]) &&
+    Array.isArray(r[0][0]) &&
+    typeof r[0][0][0] === "number"
+  ) {
+    // PolygonCoords
     multi = [result as PolygonCoords];
-  } else if (Array.isArray(result[0]) && Array.isArray((result as any)[0][0]) && Array.isArray((result as any)[0][0][0])) {
-    // This is MultiPolygonCoords
+  } else if (
+    Array.isArray(r) &&
+    Array.isArray(r[0]) &&
+    Array.isArray(r[0][0]) &&
+    Array.isArray(r[0][0][0]) &&
+    typeof r[0][0][0][0] === "number"
+  ) {
+    // MultiPolygonCoords
     multi = result as MultiPolygonCoords;
   } else {
-    // Fallback: treat as no polygons
     return [];
   }
 
   const polys: Polygon[] = [];
 
   for (const poly of multi) {
-    if (poly.length === 0) continue;
+    if (!Array.isArray(poly) || poly.length === 0) continue;
     const [outerRing, ...holeRings] = poly;
+    if (!Array.isArray(outerRing) || outerRing.length < 3) continue;
 
     const outer = outerRing.map(([x, y]) => ({ x, y }));
-    const holes = holeRings.map(ring => ring.map(([x, y]) => ({ x, y })));
+    const holes = holeRings
+      .filter((ring: Ring) => Array.isArray(ring) && ring.length >= 3)
+      .map((ring: Ring) => ring.map(([x, y]) => ({ x, y })));
 
     polys.push({ outer, holes });
   }
@@ -67,77 +90,162 @@ function martinezToPolygons(
 }
 
 /**
+ * Try to run Martinez boolean op, but never throw.
+ */
+function safeBooleanOp(
+  op: "union" | "diff" | "intersection",
+  a: PolygonCoords | MultiPolygonCoords,
+  b: PolygonCoords | MultiPolygonCoords
+): MultiPolygonCoords | PolygonCoords | null {
+  try {
+    if (op === "union") {
+      return martinez.union(a as any, b as any) as any;
+    }
+    if (op === "diff") {
+      return martinez.diff(a as any, b as any) as any;
+    }
+    if (op === "intersection") {
+      return martinez.intersection(a as any, b as any) as any;
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[boolean-ops] Martinez error in", op, err);
+    return null;
+  }
+  return null;
+}
+
+/**
  * Union of multiple polygons.
+ * If anything goes wrong, we just return the original input polygons.
  */
 export function unionPolygons(polys: Polygon[]): Polygon[] {
-  if (polys.length === 0) return [];
+  if (!polys.length) return [];
 
-  const polyCoordsList = polys.map(p => polygonToMartinez(p));
+  // Convert and drop invalid/degenerate polygons
+  const polyCoordsList: PolygonCoords[] = [];
+  const validPolys: Polygon[] = [];
+  for (const p of polys) {
+    const coords = polygonToMartinez(p);
+    if (coords) {
+      polyCoordsList.push(coords);
+      validPolys.push(p);
+    }
+  }
+  if (!polyCoordsList.length) return [];
+
+  if (polyCoordsList.length === 1) {
+    // Nothing to union
+    return validPolys;
+  }
 
   let result: PolygonCoords | MultiPolygonCoords | null = polyCoordsList[0];
 
   for (let i = 1; i < polyCoordsList.length; i++) {
-    result = martinez.union(result as any, polyCoordsList[i]) as any;
-    if (!result) break;
+    const next = polyCoordsList[i];
+    const res = safeBooleanOp("union", result as any, next as any);
+    if (!res) {
+      // Fallback: return original polygons if union fails
+      return validPolys;
+    }
+    result = res;
   }
 
-  return martinezToPolygons(result);
+  const merged = martinezToPolygons(result);
+  if (!merged.length) {
+    return validPolys;
+  }
+  return merged;
 }
 
 /**
  * Subtract set b from set a.
- * Result = union(a) minus union(b)
+ * Result = union(a) minus union(b).
+ * If boolean fails, returns original a.
  */
 export function subtractPolygons(a: Polygon[], b: Polygon[]): Polygon[] {
-  if (a.length === 0) return [];
-  if (b.length === 0) return a.slice();
+  if (!a.length) return [];
+  if (!b.length) return a.slice();
 
-  // Union all a polygons
-  const aCoordsList = a.map(p => polygonToMartinez(p));
+  const aCoordsList: PolygonCoords[] = [];
+  const aValid: Polygon[] = [];
+  for (const p of a) {
+    const coords = polygonToMartinez(p);
+    if (coords) {
+      aCoordsList.push(coords);
+      aValid.push(p);
+    }
+  }
+  if (!aCoordsList.length) return [];
+
+  const bCoordsList: PolygonCoords[] = [];
+  for (const p of b) {
+    const coords = polygonToMartinez(p);
+    if (coords) {
+      bCoordsList.push(coords);
+    }
+  }
+  if (!bCoordsList.length) return aValid;
+
   let aUnion: PolygonCoords | MultiPolygonCoords | null = aCoordsList[0];
   for (let i = 1; i < aCoordsList.length; i++) {
-    aUnion = martinez.union(aUnion as any, aCoordsList[i]) as any;
-    if (!aUnion) break;
+    const res = safeBooleanOp("union", aUnion as any, aCoordsList[i] as any);
+    if (!res) return aValid;
+    aUnion = res;
   }
-  if (!aUnion) return [];
 
-  // Union all b polygons
-  const bCoordsList = b.map(p => polygonToMartinez(p));
   let bUnion: PolygonCoords | MultiPolygonCoords | null = bCoordsList[0];
   for (let i = 1; i < bCoordsList.length; i++) {
-    bUnion = martinez.union(bUnion as any, bCoordsList[i]) as any;
-    if (!bUnion) break;
+    const res = safeBooleanOp("union", bUnion as any, bCoordsList[i] as any);
+    if (!res) return aValid;
+    bUnion = res;
   }
-  if (!bUnion) return martinezToPolygons(aUnion);
 
-  // Diff: aUnion minus bUnion
-  const result = martinez.diff(aUnion as any, bUnion as any) as any;
-  return martinezToPolygons(result);
+  const diffRes = safeBooleanOp("diff", aUnion as any, bUnion as any);
+  if (!diffRes) return aValid;
+
+  const result = martinezToPolygons(diffRes);
+  return result.length ? result : aValid;
 }
 
 /**
  * Intersection of set a and set b.
- * Result = union(a) intersect union(b)
+ * Result = union(a) intersect union(b).
+ * If boolean fails, returns [].
  */
 export function intersectPolygons(a: Polygon[], b: Polygon[]): Polygon[] {
-  if (a.length === 0 || b.length === 0) return [];
+  if (!a.length || !b.length) return [];
 
-  const aCoordsList = a.map(p => polygonToMartinez(p));
+  const aCoordsList: PolygonCoords[] = [];
+  for (const p of a) {
+    const coords = polygonToMartinez(p);
+    if (coords) aCoordsList.push(coords);
+  }
+  if (!aCoordsList.length) return [];
+
+  const bCoordsList: PolygonCoords[] = [];
+  for (const p of b) {
+    const coords = polygonToMartinez(p);
+    if (coords) bCoordsList.push(coords);
+  }
+  if (!bCoordsList.length) return [];
+
   let aUnion: PolygonCoords | MultiPolygonCoords | null = aCoordsList[0];
   for (let i = 1; i < aCoordsList.length; i++) {
-    aUnion = martinez.union(aUnion as any, aCoordsList[i]) as any;
-    if (!aUnion) break;
+    const res = safeBooleanOp("union", aUnion as any, aCoordsList[i] as any);
+    if (!res) return [];
+    aUnion = res;
   }
-  if (!aUnion) return [];
 
-  const bCoordsList = b.map(p => polygonToMartinez(p));
   let bUnion: PolygonCoords | MultiPolygonCoords | null = bCoordsList[0];
   for (let i = 1; i < bCoordsList.length; i++) {
-    bUnion = martinez.union(bUnion as any, bCoordsList[i]) as any;
-    if (!bUnion) break;
+    const res = safeBooleanOp("union", bUnion as any, bCoordsList[i] as any);
+    if (!res) return [];
+    bUnion = res;
   }
-  if (!bUnion) return [];
 
-  const result = martinez.intersection(aUnion as any, bUnion as any) as any;
-  return martinezToPolygons(result);
+  const interRes = safeBooleanOp("intersection", aUnion as any, bUnion as any);
+  if (!interRes) return [];
+
+  return martinezToPolygons(interRes);
 }

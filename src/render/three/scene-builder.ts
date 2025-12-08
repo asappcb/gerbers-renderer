@@ -44,8 +44,31 @@ export function buildPcbScene(
   const heightUnits = geometry.heightMm * mmToUnits;
   const thicknessUnits = geometry.thicknessMm * mmToUnits;
 
-  const offsetXmm = geometry.widthMm / 2;
-  const offsetYmm = geometry.heightMm / 2;
+  // - Board center in world mm coordinates -
+  // If we have an outline polygon, compute its bbox center.
+  // Otherwise, fall back to width/2 and height/2.
+  let offsetXmm = geometry.widthMm / 2;
+  let offsetYmm = geometry.heightMm / 2;
+
+  if (geometry.outline && geometry.outline.polygons.length > 0) {
+    const poly = geometry.outline.polygons[0];
+    if (poly.outer && poly.outer.length > 0) {
+      let minX = poly.outer[0].x;
+      let maxX = poly.outer[0].x;
+      let minY = poly.outer[0].y;
+      let maxY = poly.outer[0].y;
+
+      for (const p of poly.outer) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.y > maxY) maxY = p.y;
+      }
+
+      offsetXmm = (minX + maxX) / 2;
+      offsetYmm = (minY + maxY) / 2;
+    }
+  }
 
   // FR4 core - centered at origin
   const fr4Geom = new THREE.BoxGeometry(widthUnits, heightUnits, thicknessUnits);
@@ -150,7 +173,6 @@ export function buildPcbScene(
     group.add(drillGroup);
   }
 
-  // Center group at origin
   group.position.set(0, 0, 0);
 
   return {
@@ -162,23 +184,43 @@ export function buildPcbScene(
 
 function extrudeLayerPolygons(
   layer: LayerGeometry,
-  geometry: PcbModelGeometry,
+  _geometry: PcbModelGeometry,
   mmToUnits: number,
   offsetXmm: number,
   offsetYmm: number,
   thicknessUnits: number
 ): THREE.BufferGeometry[] {
-  const geoms: THREE.BufferGeometry[] = [];
+  const shapes: THREE.Shape[] = [];
+
   for (const poly of layer.polygons) {
+    if (!poly.outer || poly.outer.length < 3) continue;
+
     const shape = polygonToShape(poly, mmToUnits, offsetXmm, offsetYmm);
-    const extrudeGeom = new THREE.ExtrudeGeometry(shape, {
-      depth: thicknessUnits,
-      bevelEnabled: false,
-    });
-    geoms.push(extrudeGeom);
+
+    // If this shape ended up with too few points, skip it
+    const pts = shape.getPoints();
+    if (!pts || pts.length < 3) continue;
+
+    shapes.push(shape);
   }
-  return geoms;
+
+  if (shapes.length === 0) {
+    return [];
+  }
+
+  const extrudeGeom = new THREE.ExtrudeGeometry(shapes, {
+    depth: thicknessUnits,
+    bevelEnabled: false,
+  });
+
+  // Center extruded volume around local z=0
+  extrudeGeom.translate(0, 0, -thicknessUnits / 2);
+
+  // We return a single geometry in an array, so the rest of the code still works
+  return [extrudeGeom];
 }
+
+
 
 function polygonToShape(
   poly: Polygon,
@@ -188,7 +230,7 @@ function polygonToShape(
 ): THREE.Shape {
   const shape = new THREE.Shape();
 
-  if (!poly.outer.length) {
+  if (!poly.outer || poly.outer.length < 3) {
     return shape;
   }
 
@@ -209,7 +251,8 @@ function polygonToShape(
   shape.closePath();
 
   for (const hole of poly.holes || []) {
-    if (!hole.length) continue;
+    if (!hole || hole.length < 3) continue;
+
     const path = new THREE.Path();
     const h0 = hole[0];
     path.moveTo(
@@ -230,9 +273,10 @@ function polygonToShape(
   return shape;
 }
 
+
 function buildDrillGroup(
   drills: DrillHole[],
-  geometry: PcbModelGeometry,
+  _geometry: PcbModelGeometry,
   mmToUnits: number,
   offsetXmm: number,
   offsetYmm: number,
@@ -257,7 +301,7 @@ function buildDrillGroup(
       16
     );
 
-    // Cylinder axis is Y in Three by default, we want Z
+    // Cylinder axis is Y in Three by default, rotate so axis is Z
     geom.rotateX(Math.PI / 2);
 
     const xUnits = (hole.x - offsetXmm) * mmToUnits;

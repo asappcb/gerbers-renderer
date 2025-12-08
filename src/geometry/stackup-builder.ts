@@ -18,21 +18,12 @@ import {
   DEFAULT_BOARD_WIDTH_MM,
   DEFAULT_BOARD_HEIGHT_MM,
 } from "./constants";
+import { polygonizePrimitives } from "./polygonizer";
+// import { unionPolygons } from "./boolean-ops";
+
 
 /**
  * Build the high level PcbModelGeometry from parsed Gerber and drill data.
- *
- * This is where we:
- * - Decide board width and height
- * - Create copper, mask, silk, and outline layers
- * - Attach drills
- *
- * Right now this is intentionally simple. It:
- * - Uses a stub outline extractor
- * - Uses full board rectangles for copper layers
- * - Passes through drill holes from the parsed drill data
- *
- * Later you will replace this with real polygonization based on primitives.
  */
 export function buildPcbGeometry(params: BuildPcbGeometryParams): PcbModelGeometry {
   const { parsedGerbers, parsedDrills, boardThicknessMm } = params;
@@ -60,15 +51,36 @@ export function buildPcbGeometry(params: BuildPcbGeometryParams): PcbModelGeomet
 
   for (const layer of parsedGerbers) {
     const lk = roleToSideAndKind(layer);
-    if (!lk.kind || !lk.side) {
-      continue;
+    if (!lk.kind || !lk.side) continue;
+
+    // 1) polygonize
+    let polys = polygonizePrimitives(layer.primitives);
+
+    // 2) drop junk
+    if (polys) {
+      polys = polys.filter(p => p.outer && p.outer.length >= 3);
+    }
+
+    // // 3) union for copper so rectangles + circles become single islands
+    // if (lk.kind === "copper" && polys && polys.length > 1) {
+    //   polys = unionPolygons(polys);
+    // }
+
+    // After union...
+    if (polys) {
+      polys = polys.filter(p => p.outer && p.outer.length >= 3);
+    }
+
+    // 4) fallback
+    if (!polys || polys.length === 0) {
+      polys = [boardRectPoly];
     }
 
     const layerGeom: LayerGeometry = {
       name: layer.name,
       side: lk.side,
       kind: lk.kind,
-      polygons: [boardRectPoly],
+      polygons: polys,
     };
 
     if (lk.kind === "copper") {
@@ -80,7 +92,7 @@ export function buildPcbGeometry(params: BuildPcbGeometryParams): PcbModelGeomet
     }
   }
 
-  // Ensure at least top and bottom copper exist so the viewer has something to show
+  // Ensure at least top and bottom copper exist
   if (!copperLayers.some(l => l.side === "top")) {
     copperLayers.push({
       name: "auto_top_copper",
@@ -121,9 +133,6 @@ export function buildPcbGeometry(params: BuildPcbGeometryParams): PcbModelGeomet
   return geometry;
 }
 
-/**
- * Map a parsed Gerber layer role to side and kind.
- */
 function roleToSideAndKind(
   layer: ParsedGerberLayer
 ): { side: PcbSide | null; kind: PcbLayerKind | null } {
@@ -136,7 +145,6 @@ function roleToSideAndKind(
     return { side: "bottom", kind: "copper" };
   }
   if (role === "inner_copper") {
-    // Inner copper has no side, but we might treat as copper later
     return { side: null, kind: "copper" };
   }
 
@@ -161,10 +169,14 @@ function roleToSideAndKind(
   return { side: null, kind: null };
 }
 
-/**
- * Compute a simple axis-aligned bounding box for a polygon.
- */
-function computeBoundingBox(poly: Polygon): { minX: number; minY: number; maxX: number; maxY: number; width: number; height: number } {
+function computeBoundingBox(poly: Polygon): {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  width: number;
+  height: number;
+} {
   if (!poly.outer.length) {
     return {
       minX: 0,
@@ -194,9 +206,6 @@ function computeBoundingBox(poly: Polygon): { minX: number; minY: number; maxX: 
   return { minX, minY, maxX, maxY, width, height };
 }
 
-/**
- * Flatten all drill holes from parsed drill data.
- */
 function flattenDrills(parsedDrills: { holes: DrillHole[] }[]): DrillHole[] {
   const out: DrillHole[] = [];
   for (const d of parsedDrills) {
