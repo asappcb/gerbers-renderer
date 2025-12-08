@@ -1,31 +1,51 @@
 {
   "name": "gerbers-renderer",
   "version": "1.0.0",
-  "description": "Renders PCB gerbers",
-  "main": "index.js",
-  "directories": {
-    "example": "examples"
-  },
+  "description": "Renders PCB Gerbers in 3D using Three.js",
+  "type": "module",
+  "main": "dist/index.cjs",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+
+  "files": [
+    "dist"
+  ],
+
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "echo \"No tests yet\""
   },
+
   "repository": {
     "type": "git",
     "url": "git+https://github.com/asappcb/gerbers-renderer.git"
   },
-  "keywords": [],
+
+  "keywords": [
+    "pcb",
+    "gerber",
+    "threejs",
+    "renderer",
+    "webgl",
+    "electronics"
+  ],
+
   "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "license": "MIT",
+
   "bugs": {
     "url": "https://github.com/asappcb/gerbers-renderer/issues"
   },
   "homepage": "https://github.com/asappcb/gerbers-renderer#readme",
+
   "dependencies": {
     "jszip": "^3.10.1",
     "martinez-polygon-clipping": "^0.8.1",
     "three": "^0.181.2"
   },
+
   "devDependencies": {
     "@types/jszip": "^3.4.0",
     "@types/node": "^24.10.1",
