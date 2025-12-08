@@ -3,6 +3,7 @@
 import type { RenderFromZipOptions, LoadFromZipOptions } from "../types/options";
 import type { PcbModelGeometry } from "../types/pcb-model";
 import { loadPcbGeometryFromZip as loadGeometry } from "./pipeline";
+import { Viewer3D } from "../render/three/viewer-3d";
 
 /**
  * Thin wrapper around the pipeline to expose a nice geometry loader.
@@ -33,15 +34,34 @@ export async function loadPcbGeometryFromZip(
  *   - resize
  *   - dispose
  */
+// export async function renderGerbersZip(
+//   input: File | Blob | ArrayBuffer,
+//   options: RenderFromZipOptions
+// ): Promise<{ geometry: PcbModelGeometry }> {
+//   const geometry = await loadGeometry(input, options);
+
+//   // TODO: in the next step, integrate with a Viewer3D class, for example:
+//   // const viewer = new Viewer3D(geometry, { canvas: options.canvas, ... });
+//   // return { geometry, viewer };
+
+//   return { geometry };
+// }
+
+
 export async function renderGerbersZip(
   input: File | Blob | ArrayBuffer,
   options: RenderFromZipOptions
-): Promise<{ geometry: PcbModelGeometry }> {
+): Promise<{ geometry: PcbModelGeometry; viewer?: Viewer3D }> {
   const geometry = await loadGeometry(input, options);
 
-  // TODO: in the next step, integrate with a Viewer3D class, for example:
-  // const viewer = new Viewer3D(geometry, { canvas: options.canvas, ... });
-  // return { geometry, viewer };
+  let viewer: Viewer3D | undefined;
+  if (options.canvas) {
+    viewer = new Viewer3D(geometry, {
+      canvas: options.canvas,
+      autoResize: true,
+      usePbrMaterials: true,
+    });
+  }
 
-  return { geometry };
+  return { geometry, viewer };
 }

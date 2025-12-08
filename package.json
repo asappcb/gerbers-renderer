@@ -23,11 +23,13 @@
   "homepage": "https://github.com/asappcb/gerbers-renderer#readme",
   "dependencies": {
     "jszip": "^3.10.1",
-    "martinez-polygon-clipping": "^0.8.1"
+    "martinez-polygon-clipping": "^0.8.1",
+    "three": "^0.181.2"
   },
   "devDependencies": {
     "@types/jszip": "^3.4.0",
     "@types/node": "^24.10.1",
+    "@types/three": "^0.181.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "vite": "^7.2.7"
