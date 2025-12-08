@@ -22,7 +22,8 @@
   },
   "homepage": "https://github.com/asappcb/gerbers-renderer#readme",
   "dependencies": {
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "martinez-polygon-clipping": "^0.8.1"
   },
   "devDependencies": {
     "@types/jszip": "^3.4.0",

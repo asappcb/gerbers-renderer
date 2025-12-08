@@ -1,17 +1,47 @@
-import { loadPcbGeometryFromZip } from "./pipeline";
-import { Viewer3D } from "../render/three/viewer-3d";
-import type { RenderFromZipOptions } from "../types/options";
-import type { PcbModelGeometry } from "../types/pcb-model";
+// src/core/gerber-renderer.ts
 
-export async function renderGerbersZip(file: File | ArrayBuffer, opts: RenderFromZipOptions) {
-  const geometry = await loadPcbGeometryFromZip(file, opts);
-  const viewer = new Viewer3D(geometry, opts);
-  return viewer; // exposes .dispose(), .setLayerVisible(), etc
+import type { RenderFromZipOptions, LoadFromZipOptions } from "../types/options";
+import type { PcbModelGeometry } from "../types/pcb-model";
+import { loadPcbGeometryFromZip as loadGeometry } from "./pipeline";
+
+/**
+ * Thin wrapper around the pipeline to expose a nice geometry loader.
+ *
+ * This is what you would call if you just want the parsed geometry:
+ *
+ *   const geom = await loadPcbGeometryFromZip(file, { boardThicknessMm: 1.6 });
+ */
+export async function loadPcbGeometryFromZip(
+  input: File | Blob | ArrayBuffer,
+  options: LoadFromZipOptions = {}
+): Promise<PcbModelGeometry> {
+  return loadGeometry(input, options);
 }
 
-export async function loadPcbGeometryFromZip(
-  file: File | ArrayBuffer,
-  opts?: RenderFromZipOptions
-): Promise<PcbModelGeometry> {
-  return loadPcbGeometryFromZip(file, opts);
+/**
+ * Future facing entry point that will also create and manage a 3D viewer.
+ *
+ * For now, this only loads the geometry and returns it, while ignoring
+ * the canvas option. Once the Three.js viewer is implemented, this
+ * function will:
+ *
+ * - Load geometry from the zip
+ * - Build a Three.js scene
+ * - Attach it to the provided canvas
+ * - Return a Viewer instance with methods like:
+ *   - setLayerVisible
+ *   - resize
+ *   - dispose
+ */
+export async function renderGerbersZip(
+  input: File | Blob | ArrayBuffer,
+  options: RenderFromZipOptions
+): Promise<{ geometry: PcbModelGeometry }> {
+  const geometry = await loadGeometry(input, options);
+
+  // TODO: in the next step, integrate with a Viewer3D class, for example:
+  // const viewer = new Viewer3D(geometry, { canvas: options.canvas, ... });
+  // return { geometry, viewer };
+
+  return { geometry };
 }
