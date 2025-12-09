@@ -21,6 +21,11 @@ const DEFAULT_CIRCLE_SEGMENTS = 32;
 
 // For endpoint matching in polyline building (mm^2)
 const POINT_JOIN_EPS = 1e-3;
+const UNION_SNAP_GRID = 1e-5;
+
+function snapCoord(v: number): number {
+  return Math.round(v / UNION_SNAP_GRID) * UNION_SNAP_GRID;
+}
 
 // -----------------------------------------------------------------------------
 // Public API
@@ -31,9 +36,10 @@ export function polygonizePrimitives(prims: GerberPrimitives): Polygon[] {
 
   // 1) Tracks -> polylines -> stroked polygons
   if (prims.tracks && prims.tracks.length) {
-    const polylines = buildPolylines(prims.tracks);
-    for (const pl of polylines) {
-      const poly = strokePolyline(pl.points, pl.width);
+    for (const t of prims.tracks) {
+      const width = t.width || DEFAULT_TRACE_WIDTH_MM;
+      // Stroke just this segment: [start, end]
+      const poly = strokePolyline([t.start, t.end], width);
       if (poly) polygons.push(poly);
     }
   }
@@ -89,34 +95,46 @@ export function polygonizePrimitivesUnion(prims: GerberPrimitives): Polygon[] {
 // -----------------------------------------------------------------------------
 // Boolean union helpers (using polygon-clipping)
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// Boolean union helpers (using polygon-clipping)
+// -----------------------------------------------------------------------------
 
-// Convert your Polygon into a MultiPolygon for polygon-clipping.
-// One of your Polygons becomes a MultiPolygon with a single Polygon:
-// [ [outerRing, holeRing1, holeRing2, ...] ]
-function polygonToMulti(poly: Polygon): PcMultiPolygon {
-  const rings: PcRing[] = [];
+// Turn one of your Polygons into a GeoJSON-style polygon: [outerRing, hole1, ...]
+function toPcPolygon(poly: Polygon): PcPolygon | null {
+  if (!poly.outer || poly.outer.length < 3) return null;
 
-  // Outer ring
-  const outerRing: PcRing = poly.outer.map((p) => [p.x, p.y]);
-  if (outerRing.length >= 3) {
-    rings.push(outerRing);
-  }
+  const makeRing = (pts: Vec2[]): PcRing | null => {
+    if (!pts || pts.length < 3) return null;
 
-  // Holes
+    const ring: PcRing = pts.map((p) => [snapCoord(p.x), snapCoord(p.y)]);
+
+    // Ensure ring is explicitly closed
+    const [fx, fy] = ring[0];
+    const [lx, ly] = ring[ring.length - 1];
+    if (fx !== lx || fy !== ly) {
+      ring.push([fx, fy]);
+    }
+
+    return ring;
+  };
+
+  const outerRing = makeRing(poly.outer);
+  if (!outerRing) return null;
+
+  const rings: PcRing[] = [outerRing];
+
   if (poly.holes && poly.holes.length) {
     for (const hole of poly.holes) {
-      if (!hole || hole.length < 3) continue;
-      const holeRing: PcRing = hole.map((p) => [p.x, p.y]);
-      rings.push(holeRing);
+      const holeRing = makeRing(hole);
+      if (holeRing) rings.push(holeRing);
     }
   }
 
-  // A MultiPolygon is an array of polygons, each polygon is an array of rings
-  return rings.length ? [rings] : [];
+  return rings;
 }
 
-// Convert a MultiPolygon result from polygon-clipping back into your Polygon[]
-function multiToPolygons(mp: PcMultiPolygon): Polygon[] {
+// Convert a MultiPolygon result back into your Polygon[]
+function fromPcMulti(mp: PcLibMultiPolygon): Polygon[] {
   const out: Polygon[] = [];
 
   for (const polyRings of mp) {
@@ -129,12 +147,10 @@ function multiToPolygons(mp: PcMultiPolygon): Polygon[] {
       ring.map(([x, y]) => ({ x, y }))
     );
 
-    // Normalize winding to your convention
-    const normOuter = ensureClockwise(outer);
-    const normHoles = holes.map((h) => ensureCounterClockwise(h));
-
-    if (normOuter.length >= 3) {
-      out.push({ outer: normOuter, holes: normHoles });
+    // polygon-clipping already guarantees valid, non-self-intersecting rings
+    // and sets orientation consistently, so we do NOT reflip them here.
+    if (outer.length >= 3) {
+      out.push({ outer, holes });
     }
   }
 
@@ -145,24 +161,26 @@ function multiToPolygons(mp: PcMultiPolygon): Polygon[] {
 export function unionPolygons(polys: Polygon[]): Polygon[] {
   if (!polys.length) return [];
 
-  const args: PcMultiPolygon[] = polys
-    .map(polygonToMulti)
-    .filter((mp) => mp.length > 0);
+  // Flatten all your polygons into a single MultiPolygon
+  const multi: PcLibMultiPolygon = [];
 
-  if (!args.length) return [];
+  for (const p of polys) {
+    const pcPoly = toPcPolygon(p);
+    if (!pcPoly) continue;
+    multi.push(pcPoly);
+  }
 
-  // polygon-clipping expects each argument to be a MultiPolygon.
-  // Its TS type uses a rest parameter, but we help TS a bit with casting.
-  const result = (polygonClipping as any).union(
-    ...(args as any[])
-  ) as PcMultiPolygon | null;
+  if (!multi.length) return [];
 
+  // Single-arg union: pass the MultiPolygon once
+  const result = polygonClipping.union(
+    multi as unknown as PcLibMultiPolygon
+  ) as PcLibMultiPolygon | null;
 
   if (!result || !result.length) return [];
 
-  return multiToPolygons(result);
+  return fromPcMulti(result);
 }
-
 
 
 // -----------------------------------------------------------------------------
@@ -399,38 +417,53 @@ function strokePolyline(points: Vec2[], width: number): Polygon | null {
   }
 
   // Helper to compute a single miter point (or max-miter point)
-function computeMiter(dPrev: Vec2, dNext: Vec2, isLeft: boolean): Vec2 {
-  const nPrev = isLeft ? leftNormal(dPrev) : rightNormal(dPrev);
-  const nNext = isLeft ? leftNormal(dNext) : rightNormal(dNext);
+  // Helper to compute a single miter point (or bevel) for a joint
+  function computeMiter(dPrev: Vec2, dNext: Vec2, isLeft: boolean): Vec2 {
+    const nPrev = isLeft ? leftNormal(dPrev) : rightNormal(dPrev);
+    const nNext = isLeft ? leftNormal(dNext) : rightNormal(dNext);
 
-  let mx = nPrev.x + nNext.x;
-  let my = nPrev.y + nNext.y;
-  const mLen = Math.hypot(mx, my);
+    // If either direction is degenerate, just bevel using the existing normal.
+    const lenPrev = Math.hypot(dPrev.x, dPrev.y);
+    const lenNext = Math.hypot(dNext.x, dNext.y);
+    if (lenPrev < 1e-6 || lenNext < 1e-6) {
+      return nPrev;
+    }
 
-  // Degenerate: lines almost colinear or normals cancel out
-  if (mLen < 1e-6) {
-    return nPrev; // fall back to simple bevel
+    // Determine if this side is the outer (convex) or inner (concave) side
+    const cross = dPrev.x * dNext.y - dPrev.y * dNext.x;
+    const turningLeft = cross > 0;
+    const sideIsOuter = isLeft ? turningLeft : !turningLeft;
+
+    // Near straight or concave: bevel (no miter)
+    if (!sideIsOuter || Math.abs(cross) < 1e-6) {
+      return nPrev;
+    }
+
+    // Compute miter direction like in your original code
+    let mx = nPrev.x + nNext.x;
+    let my = nPrev.y + nNext.y;
+    let mLen = Math.hypot(mx, my);
+    if (mLen < 1e-6) {
+      return nPrev;
+    }
+
+    mx /= mLen;
+    my /= mLen;
+
+    const dot = mx * nPrev.x + my * nPrev.y;
+    if (Math.abs(dot) < 1e-3) {
+      return nPrev;
+    }
+
+    let scaleFactor = 1 / dot;
+
+    // Clamp miter length on very sharp convex corners
+    if (Math.abs(scaleFactor) > MITER_LIMIT) {
+      scaleFactor = Math.sign(scaleFactor) * MITER_LIMIT;
+    }
+
+    return scale({ x: mx, y: my }, scaleFactor);
   }
-
-  mx /= mLen;
-  my /= mLen;
-
-  const dot = mx * nPrev.x + my * nPrev.y;
-
-  // Concave or nearly 180 degrees: don't miter, just bevel
-  if (dot <= 1e-3) {
-    return nPrev;
-  }
-
-  let scaleFactor = 1 / dot;
-
-  // Limit miter length on very sharp convex corners
-  if (scaleFactor > MITER_LIMIT) {
-    scaleFactor = MITER_LIMIT;
-  }
-
-  return scale({ x: mx, y: my }, scaleFactor);
-}
 
 
 

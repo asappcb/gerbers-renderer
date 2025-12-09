@@ -15,6 +15,11 @@ import {
 
 export interface SceneBuildOptions {
   usePbrMaterials?: boolean;
+
+  // You can forward any MaterialOptions fields through here if you want:
+  fr4TexScaleMm?: number;
+  fr4ColorMap?: string;
+  fr4NormalMap?: string;
 }
 
 export interface SceneBuildResult {
@@ -72,9 +77,22 @@ export function buildPcbScene(
 
   // FR4 core - centered at origin
   const fr4Geom = new THREE.BoxGeometry(widthUnits, heightUnits, thicknessUnits);
-  const fr4Mat = createFr4Material(opts);
+  const fr4Mat = createFr4Material({
+    boardWidthMm: geometry.widthMm,
+    boardHeightMm: geometry.heightMm,
+    fr4TexScaleMm: opts.fr4TexScaleMm,
+    fr4ColorMap: opts.fr4ColorMap,
+    fr4NormalMap: opts.fr4NormalMap,
+    usePbrMaterials: opts.usePbrMaterials,
+  });
   const fr4Mesh = new THREE.Mesh(fr4Geom, fr4Mat);
+
+  // Make sure it reacts to lights and shadows
+  fr4Mesh.castShadow = true;
+  fr4Mesh.receiveShadow = true;
+
   group.add(fr4Mesh);
+
 
   // Copper, mask, silk thickness in units
   const copperThick = 0.035 * mmToUnits;
@@ -220,8 +238,6 @@ function extrudeLayerPolygons(
   return [extrudeGeom];
 }
 
-
-
 function polygonToShape(
   poly: Polygon,
   mmToUnits: number,
@@ -272,7 +288,6 @@ function polygonToShape(
 
   return shape;
 }
-
 
 function buildDrillGroup(
   drills: DrillHole[],
