@@ -42,13 +42,25 @@ export interface GerberPrimitives {
 }
 
 /**
- * Minimal aperture model. For now we only care about round apertures
- * so we can assign a track width and flash diameter.
+ * Represents a Gerber aperture definition.
+ * 
+ * For rendering purposes, we convert all aperture shapes to an "effective diameter"
+ * to simplify the rendering pipeline while maintaining correct visual proportions.
  */
 interface Aperture {
-  code: number;          // 10, 11, ...
-  shape: "C" | "R" | "O";
-  diameterMm?: number;   // for C
+  code: number;
+  shape: string;         // C, R, O, P, macro, etc.
+  diameterMm?: number;   // effective diameter (for traces / circular pads)
+  widthMm?: number;      // for R / O
+  heightMm?: number;     // for R / O
+}
+
+export interface GerberPrimitiveFlash {
+  position: Vec2;
+  diameterMm: number;    // keep for circular and general “size”
+  shape: string;         // "C" | "R" | "O" | ...
+  widthMm?: number;      // for R / O
+  heightMm?: number;     // for R / O
 }
 
 /**
@@ -187,31 +199,63 @@ function handleParameterBlock(block: string, state: ParserState) {
 
   if (body.startsWith("MO")) {
     // Units, MOMM or MOIN
+    const oldScale = state.unitScale;
+    let newScale = oldScale;
+
     if (body.includes("MOMM")) {
-      state.unitScale = 1.0;
+      newScale = 1.0;
     } else if (body.includes("MOIN")) {
-      state.unitScale = 25.4;
+      newScale = 25.4;
+    }
+
+    if (newScale !== oldScale) {
+      const factor = newScale / oldScale;
+
+      for (const ap of state.apertures.values()) {
+        if (ap.diameterMm !== undefined) ap.diameterMm *= factor;
+        if (ap.widthMm !== undefined) ap.widthMm *= factor;
+        if (ap.heightMm !== undefined) ap.heightMm *= factor;
+      }
+
+      state.unitScale = newScale;
     }
     return;
   }
 
   if (body.startsWith("AD")) {
-    // Aperture definition, e.g. ADD10C,0.300
     const m = /AD(D?)(\d+)([A-Z]),?([0-9.Xx]*)/.exec(body);
     if (!m) return;
 
     const code = parseInt(m[2], 10);
-    const shape = m[3] as "C" | "R" | "O";
-    const params = m[4];
+    const shape = m[3]; // do not narrow here
+    const params = m[4] ?? "";
 
-    let diameterMm: number | undefined = undefined;
+    let diameterMm: number | undefined;
+    let widthMm: number | undefined;
+    let heightMm: number | undefined;
 
-    if (shape === "C" && params) {
-      // Circular, diameter in file units
-      const firstParam = params.split(/[Xx]/)[0];
-      const raw = parseFloat(firstParam);
-      if (!Number.isNaN(raw)) {
-        diameterMm = raw * state.unitScale;
+    if (params) {
+      const parts = params.split(/[Xx]/);
+
+      // You can use your existing parser or the more robust one from before.
+      const sizeXmm = parts[0] ? parseFloat(parts[0]) * state.unitScale : undefined;
+      const sizeYmm = parts[1] ? parseFloat(parts[1]) * state.unitScale : undefined;
+
+      if (shape === "C") {
+        diameterMm = sizeXmm;
+      } else if (shape === "R" || shape === "O") {
+        widthMm = sizeXmm;
+        heightMm = sizeYmm;
+
+        // For traces we still want a reasonable width, so keep an effective diameter too.
+        if (sizeXmm !== undefined && sizeYmm !== undefined) {
+          diameterMm = Math.min(sizeXmm, sizeYmm);  // use the narrow side as “diameter”
+        } else {
+          diameterMm = sizeXmm ?? sizeYmm;
+        }
+      } else {
+        // Other shapes - keep first param as a generic diameter
+        diameterMm = sizeXmm ?? sizeYmm;
       }
     }
 
@@ -219,7 +263,10 @@ function handleParameterBlock(block: string, state: ParserState) {
       code,
       shape,
       diameterMm,
+      widthMm,
+      heightMm,
     };
+
     state.apertures.set(code, ap);
     return;
   }
@@ -364,22 +411,30 @@ function handleCommandLine(line: string, state: ParserState) {
   }
 
   if (dCode === 3) {
-    // Flash
     if (state.currentAperture) {
+      const ap = state.currentAperture;
+
       const d =
-        state.currentAperture.diameterMm !== undefined
-          ? state.currentAperture.diameterMm
+        ap.diameterMm !== undefined
+          ? ap.diameterMm
           : DEFAULT_FLASH_DIAM_MM;
 
-      state.flashes.push({
+      const flash: GerberPrimitiveFlash = {
         position: { x: newX, y: newY },
         diameterMm: d,
-      });
+        shape: ap.shape,
+      };
+
+      if (ap.widthMm !== undefined) flash.widthMm = ap.widthMm;
+      if (ap.heightMm !== undefined) flash.heightMm = ap.heightMm;
+
+      state.flashes.push(flash);
     }
     state.x = newX;
     state.y = newY;
     return;
   }
+
 
   // Other D codes ignored for now
 }
@@ -399,4 +454,23 @@ function decodeCoord(numStr: string, state: ParserState): number {
   const scale = Math.pow(10, state.fmtDec);
   const val = (n / scale) * state.unitScale;
   return sign * val;
+}
+
+function parseApertureParam(raw: string, state: ParserState): number | undefined {
+  const s = raw.trim();
+  if (!s) return undefined;
+
+  // If it contains a decimal point, treat as a real value in current units
+  if (s.includes(".")) {
+    const v = parseFloat(s);
+    if (Number.isNaN(v)) return undefined;
+    return v * state.unitScale;
+  }
+
+  // Otherwise treat it like FS style integer (same fmtDec as coordinates)
+  const n = parseInt(s, 10);
+  if (Number.isNaN(n)) return undefined;
+
+  const scale = Math.pow(10, state.fmtDec);
+  return (n / scale) * state.unitScale;
 }

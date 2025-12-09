@@ -48,19 +48,35 @@ export function polygonizePrimitives(prims: GerberPrimitives): Polygon[] {
   // If you start filling prims.arcs, you can approximate each arc by a
   // centerline polyline and call strokePolyline on it as well.
 
-  // 3) Flashes -> circular pads
+  // 3) Flashes -> pads by shape
   if (prims.flashes && prims.flashes.length) {
     for (const flash of prims.flashes) {
-      const d =
-        flash.diameterMm && flash.diameterMm > 0
-          ? flash.diameterMm
-          : DEFAULT_FLASH_DIAM_MM;
-      const circle = approximateCircle(
-        flash.position,
-        d / 2,
-        DEFAULT_CIRCLE_SEGMENTS
-      );
-      polygons.push(circle);
+      const shape = flash.shape;
+
+      if ((shape === "R" || shape === "O") &&
+          flash.widthMm !== undefined &&
+          flash.heightMm !== undefined) {
+        // Rectangular / oblong pad - render as rectangle for now
+        const rect = approximateRectangle(
+          flash.position,
+          flash.widthMm,
+          flash.heightMm
+        );
+        polygons.push(rect);
+      } else {
+        // Default: circular pad
+        const d =
+          flash.diameterMm && flash.diameterMm > 0
+            ? flash.diameterMm
+            : DEFAULT_FLASH_DIAM_MM;
+
+        const circle = approximateCircle(
+          flash.position,
+          d / 2,
+          DEFAULT_CIRCLE_SEGMENTS
+        );
+        polygons.push(circle);
+      }
     }
   }
 
@@ -633,3 +649,22 @@ function rotate(d: Vec2, angle: number): Vec2 {
   };
 }
 */
+
+function approximateRectangle(
+  center: Vec2,
+  widthMm: number,
+  heightMm: number
+): Polygon {
+  const hw = widthMm / 2;
+  const hh = heightMm / 2;
+
+  const outer: Vec2[] = [
+    { x: center.x - hw, y: center.y - hh },
+    { x: center.x + hw, y: center.y - hh },
+    { x: center.x + hw, y: center.y + hh },
+    { x: center.x - hw, y: center.y + hh },
+  ];
+
+  // We do not need holes for simple pads
+  return { outer, holes: [] };
+}
