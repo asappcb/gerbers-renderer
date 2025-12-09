@@ -304,36 +304,39 @@ function strokePolyline(points: Vec2[], width: number): Polygon | null {
   }
 
   // Helper to compute a single miter point (or max-miter point)
-  function computeMiter(dPrev: Vec2, dNext: Vec2, isLeft: boolean): Vec2 {
-    const nPrev = isLeft ? leftNormal(dPrev) : rightNormal(dPrev);
-    const nNext = isLeft ? leftNormal(dNext) : rightNormal(dNext);
+function computeMiter(dPrev: Vec2, dNext: Vec2, isLeft: boolean): Vec2 {
+  const nPrev = isLeft ? leftNormal(dPrev) : rightNormal(dPrev);
+  const nNext = isLeft ? leftNormal(dNext) : rightNormal(dNext);
 
-    let mx = nPrev.x + nNext.x;
-    let my = nPrev.y + nNext.y;
-    let mLen = Math.hypot(mx, my);
+  let mx = nPrev.x + nNext.x;
+  let my = nPrev.y + nNext.y;
+  const mLen = Math.hypot(mx, my);
 
-    if (mLen < 1e-6) {
-        return nPrev;
-    }
-
-    mx /= mLen;
-    my /= mLen;
-
-    const dot = mx * nPrev.x + my * nPrev.y;
-
-    if (Math.abs(dot) < 1e-3) {
-      return nPrev;
-    }
-
-    let scaleFactor = 1 / dot;
-
-    if (Math.abs(scaleFactor) > MITER_LIMIT) {
-      // Bevel joint: use the miter limit
-      return scale({ x: mx, y: my }, Math.sign(scaleFactor) * MITER_LIMIT);
-    }
-
-    return scale({ x: mx, y: my }, scaleFactor);
+  // Degenerate: lines almost colinear or normals cancel out
+  if (mLen < 1e-6) {
+    return nPrev; // fall back to simple bevel
   }
+
+  mx /= mLen;
+  my /= mLen;
+
+  const dot = mx * nPrev.x + my * nPrev.y;
+
+  // Concave or nearly 180 degrees: don't miter, just bevel
+  if (dot <= 1e-3) {
+    return nPrev;
+  }
+
+  let scaleFactor = 1 / dot;
+
+  // Limit miter length on very sharp convex corners
+  if (scaleFactor > MITER_LIMIT) {
+    scaleFactor = MITER_LIMIT;
+  }
+
+  return scale({ x: mx, y: my }, scaleFactor);
+}
+
 
 
   // --- PART 1: STROKE BODY (Flat Caps) ---
@@ -370,33 +373,30 @@ function strokePolyline(points: Vec2[], width: number): Polygon | null {
   const startDir = segDirs[0];
   const startCapCenter = startPt;
 
-  // The start cap connects the leftBody[0] point to the rightBody[0] point.
-  // We use the normal of the first segment to define the semicircle.
   const rightStartOffset = rightNormal(startDir);
   const startAngle = Math.atan2(rightStartOffset.y, rightStartOffset.x);
 
-  // Sweep 180 degrees from right side (theta=0) to left side (theta=PI)
+  // Sweep 180 degrees around the *back* side of the segment
   for (let i = 0; i <= CAP_SEGMENTS; i++) {
-    const theta = startAngle + (i / CAP_SEGMENTS) * Math.PI;
+    const theta = startAngle - (i / CAP_SEGMENTS) * Math.PI;
     startCapOuter.push({
       x: startCapCenter.x + Math.cos(theta) * half,
       y: startCapCenter.y + Math.sin(theta) * half,
     });
   }
 
+
   // --- PART 3: END CAP ---
   const endCapOuter: Vec2[] = [];
   const endDir = segDirs[n - 1];
   const endCapCenter = endPt;
 
-  // The end cap connects the leftBody[end] point to the rightBody[end] point.
-  // We use the normal of the last segment to define the semicircle.
   const leftEndOffset = leftNormal(endDir);
   const endAngle = Math.atan2(leftEndOffset.y, leftEndOffset.x);
 
-  // Sweep 180 degrees from left side (theta=0) to right side (theta=PI)
+  // Sweep 180 degrees around the *front* side of the segment
   for (let i = 0; i <= CAP_SEGMENTS; i++) {
-    const theta = endAngle + (i / CAP_SEGMENTS) * Math.PI;
+    const theta = endAngle - (i / CAP_SEGMENTS) * Math.PI;
     endCapOuter.push({
       x: endCapCenter.x + Math.cos(theta) * half,
       y: endCapCenter.y + Math.sin(theta) * half,
@@ -420,21 +420,10 @@ function strokePolyline(points: Vec2[], width: number): Polygon | null {
   // 4. Start Cap (Right side -> Left side, reversed, excluding start/end overlap points)
 
   const finalOuter = [
-    // 1. Left Body (Start -> End)
-    ...leftBody, 
-
-    // 2. End Cap (Skip first and last point, as they are body points)
-    // The cap points are: B, B1, B2, ..., C
-    // We want B1, B2, ... 
-    ...endCapOuter.slice(1, -1), 
-
-    // 3. Right Body (End -> Start) - REVERSED
-    ...rightBody.slice().reverse(), 
-
-    // 4. Start Cap (Skip first and last point, as they are body points)
-    // The cap points are: D, D1, D2, ..., A
-    // We reverse it, so it's A, ..., D2, D1. We want ..., D2, D1 (excluding A and D)
-    ...startCapOuter.slice(1, -1).reverse(),
+    ...leftBody,               // startL -> endL
+    ...endCapOuter,            // endL  -> endR (around front)
+    ...rightBody.slice().reverse(), // endR -> startR
+    ...startCapOuter,          // startR -> startL (around back)
   ];
 
   if (finalOuter.length < 3) return null;
@@ -481,14 +470,17 @@ function computeSignedArea(points: Vec2[]): number {
 function ensureClockwise(points: Vec2[]): Vec2[] {
   if (points.length < 3) return points;
   const area = computeSignedArea(points);
-  return area < 0 ? points : points.slice().reverse();
+  // area > 0 means clockwise in this scheme
+  return area > 0 ? points : points.slice().reverse();
 }
 
 function ensureCounterClockwise(points: Vec2[]): Vec2[] {
   if (points.length < 3) return points;
   const area = computeSignedArea(points);
-  return area > 0 ? points : points.slice().reverse();
+  // area < 0 means counterclockwise
+  return area < 0 ? points : points.slice().reverse();
 }
+
 
 // -----------------------------------------------------------------------------
 // Vec helpers
