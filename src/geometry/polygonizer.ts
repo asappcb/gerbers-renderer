@@ -7,8 +7,15 @@ import type {
   GerberPrimitiveRegion,
 } from "../parse/gerber-parser";
 
+// NEW: boolean library types
+import polygonClipping, { MultiPolygon as PcLibMultiPolygon } from "polygon-clipping";
+type PcPoint = [number, number];
+type PcRing = PcPoint[];
+type PcPolygon = PcRing[];
+type PcMultiPolygon = PcPolygon[];
+
 // Reasonable defaults
-const DEFAULT_TRACE_WIDTH_MM = 0.2;
+const DEFAULT_TRACE_WIDTH_MM = 0.15;
 const DEFAULT_FLASH_DIAM_MM = 0.8;
 const DEFAULT_CIRCLE_SEGMENTS = 32;
 
@@ -69,6 +76,94 @@ export function polygonizePrimitives(prims: GerberPrimitives): Polygon[] {
 
   return polygons;
 }
+
+// -----------------------------------------------------------------------------
+// Public API - unioned polygons for rendering
+// -----------------------------------------------------------------------------
+
+export function polygonizePrimitivesUnion(prims: GerberPrimitives): Polygon[] {
+  const raw = polygonizePrimitives(prims);
+  return unionPolygons(raw);
+}
+
+// -----------------------------------------------------------------------------
+// Boolean union helpers (using polygon-clipping)
+// -----------------------------------------------------------------------------
+
+// Convert your Polygon into a MultiPolygon for polygon-clipping.
+// One of your Polygons becomes a MultiPolygon with a single Polygon:
+// [ [outerRing, holeRing1, holeRing2, ...] ]
+function polygonToMulti(poly: Polygon): PcMultiPolygon {
+  const rings: PcRing[] = [];
+
+  // Outer ring
+  const outerRing: PcRing = poly.outer.map((p) => [p.x, p.y]);
+  if (outerRing.length >= 3) {
+    rings.push(outerRing);
+  }
+
+  // Holes
+  if (poly.holes && poly.holes.length) {
+    for (const hole of poly.holes) {
+      if (!hole || hole.length < 3) continue;
+      const holeRing: PcRing = hole.map((p) => [p.x, p.y]);
+      rings.push(holeRing);
+    }
+  }
+
+  // A MultiPolygon is an array of polygons, each polygon is an array of rings
+  return rings.length ? [rings] : [];
+}
+
+// Convert a MultiPolygon result from polygon-clipping back into your Polygon[]
+function multiToPolygons(mp: PcMultiPolygon): Polygon[] {
+  const out: Polygon[] = [];
+
+  for (const polyRings of mp) {
+    if (!polyRings.length) continue;
+
+    const [outerRing, ...holeRings] = polyRings;
+
+    const outer: Vec2[] = outerRing.map(([x, y]) => ({ x, y }));
+    const holes: Vec2[][] = holeRings.map((ring) =>
+      ring.map(([x, y]) => ({ x, y }))
+    );
+
+    // Normalize winding to your convention
+    const normOuter = ensureClockwise(outer);
+    const normHoles = holes.map((h) => ensureCounterClockwise(h));
+
+    if (normOuter.length >= 3) {
+      out.push({ outer: normOuter, holes: normHoles });
+    }
+  }
+
+  return out;
+}
+
+// Union a set of polygons on a single layer
+export function unionPolygons(polys: Polygon[]): Polygon[] {
+  if (!polys.length) return [];
+
+  const args: PcMultiPolygon[] = polys
+    .map(polygonToMulti)
+    .filter((mp) => mp.length > 0);
+
+  if (!args.length) return [];
+
+  // polygon-clipping expects each argument to be a MultiPolygon.
+  // Its TS type uses a rest parameter, but we help TS a bit with casting.
+  const result = (polygonClipping as any).union(
+    ...(args as any[])
+  ) as PcMultiPolygon | null;
+
+
+  if (!result || !result.length) return [];
+
+  return multiToPolygons(result);
+}
+
+
 
 // -----------------------------------------------------------------------------
 // Polyline building from tracks

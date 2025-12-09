@@ -18,7 +18,7 @@ import {
   DEFAULT_BOARD_WIDTH_MM,
   DEFAULT_BOARD_HEIGHT_MM,
 } from "./constants";
-import { polygonizePrimitives } from "./polygonizer";
+import { polygonizePrimitivesUnion } from "./polygonizer";
 // import { unionPolygons } from "./boolean-ops";
 
 
@@ -54,7 +54,7 @@ export function buildPcbGeometry(params: BuildPcbGeometryParams): PcbModelGeomet
     if (!lk.kind || !lk.side) continue;
 
     // 1) polygonize
-    let polys = polygonizePrimitives(layer.primitives);
+    let polys = polygonizePrimitivesUnion(layer.primitives);
 
     // 2) drop junk
     if (polys) {

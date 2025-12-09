@@ -6,23 +6,19 @@
   "main": "dist/index.cjs",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
-
   "files": [
     "dist"
   ],
-
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "echo \"No tests yet\""
   },
-
   "repository": {
     "type": "git",
     "url": "git+https://github.com/asappcb/gerbers-renderer.git"
   },
-
   "keywords": [
     "pcb",
     "gerber",
@@ -31,21 +27,18 @@
     "webgl",
     "electronics"
   ],
-
   "author": "",
   "license": "MIT",
-
   "bugs": {
     "url": "https://github.com/asappcb/gerbers-renderer/issues"
   },
   "homepage": "https://github.com/asappcb/gerbers-renderer#readme",
-
   "dependencies": {
     "jszip": "^3.10.1",
     "martinez-polygon-clipping": "^0.8.1",
+    "polygon-clipping": "^0.15.7",
     "three": "^0.181.2"
   },
-
   "devDependencies": {
     "@types/jszip": "^3.4.0",
     "@types/node": "^24.10.1",
