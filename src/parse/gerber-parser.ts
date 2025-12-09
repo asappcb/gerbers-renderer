@@ -65,8 +65,10 @@ interface ParserState {
   apertures: Map<number, Aperture>;
   currentAperture: Aperture | null;
 
+  // Region handling
   inRegion: boolean;
-  regionPoints: Vec2[];
+  regionPaths: Vec2[][]; // all contours in current region
+  currentPath: Vec2[];   // the contour currently being built
 
   tracks: GerberPrimitiveTrack[];
   arcs: GerberPrimitiveArc[];
@@ -80,7 +82,7 @@ interface ParserState {
  * This is a practical, not spec complete parser:
  * - Handles %FS, %MO, %AD for simple circular apertures (C)
  * - Handles D01 (draw), D02 (move), D03 (flash)
- * - Handles G36/G37 for filled regions
+ * - Handles G36/G37 for filled regions with multiple contours
  * - Ignores arcs (G02/G03) for now
  *
  * It is good enough to visualize traces and pads for many KiCad/JLC style Gerbers.
@@ -99,7 +101,8 @@ export function parseGerberFile(
     apertures: new Map(),
     currentAperture: null,
     inRegion: false,
-    regionPoints: [],
+    regionPaths: [],
+    currentPath: [],
     tracks: [],
     arcs: [],
     flashes: [],
@@ -129,12 +132,20 @@ export function parseGerberFile(
     handleCommandLine(line, state);
   }
 
-  // If region was left open, close it
-  if (state.inRegion && state.regionPoints.length >= 3) {
-    state.regions.push({
-      boundary: state.regionPoints.slice(),
-      holes: [],
-    });
+  // If file ended with an open region, finalize it similarly to G37.
+  if (state.inRegion) {
+    if (state.currentPath.length >= 3) {
+      state.regionPaths.push(state.currentPath);
+    }
+    if (state.regionPaths.length > 0) {
+      state.regions.push({
+        boundary: state.regionPaths[0],
+        holes: state.regionPaths.slice(1),
+      });
+    }
+    state.inRegion = false;
+    state.regionPaths = [];
+    state.currentPath = [];
   }
 
   return {
@@ -227,18 +238,28 @@ function handleCommandLine(line: string, state: ParserState) {
   // Region start / end
   if (line === "G36") {
     state.inRegion = true;
-    state.regionPoints = [];
+    state.regionPaths = [];
+    state.currentPath = [];
     return;
   }
   if (line === "G37") {
+    // Finish current contour, if any
+    if (state.currentPath.length >= 3) {
+      state.regionPaths.push(state.currentPath);
+    }
+
     state.inRegion = false;
-    if (state.regionPoints.length >= 3) {
+
+    if (state.regionPaths.length > 0) {
+      // First contour is boundary, rest are holes
       state.regions.push({
-        boundary: state.regionPoints.slice(),
-        holes: [],
+        boundary: state.regionPaths[0],
+        holes: state.regionPaths.slice(1),
       });
     }
-    state.regionPoints = [];
+
+    state.regionPaths = [];
+    state.currentPath = [];
     return;
   }
 
@@ -273,30 +294,42 @@ function handleCommandLine(line: string, state: ParserState) {
     newY = decodeCoord(coordMatchY[1], state);
   }
 
-  // If no D code, nothing to do
+  // If no D code, just move modal position
   if (dCode === null) {
-    // Just move modal position
     state.x = newX;
     state.y = newY;
     return;
   }
 
-  // Region drawing
+  // Region drawing (G36/G37 mode)
   if (state.inRegion) {
-    if (state.regionPoints.length === 0) {
-      state.regionPoints.push({ x: newX, y: newY });
-    } else if (dCode === 1) {
-      state.regionPoints.push({ x: newX, y: newY });
+    const prevX = state.x;
+    const prevY = state.y;
+
+    if (dCode === 1) {
+      // D01: draw segment from previous point to new point
+      if (state.currentPath.length === 0) {
+        // first segment of this contour: start at previous position
+        state.currentPath.push({ x: prevX, y: prevY });
+      }
+      state.currentPath.push({ x: newX, y: newY });
     } else if (dCode === 2) {
-      // Move inside region, start new chain
-      state.regionPoints.push({ x: newX, y: newY });
+      // D02: finish current contour, move without drawing
+      if (state.currentPath.length >= 3) {
+        state.regionPaths.push(state.currentPath);
+      }
+      state.currentPath = [];
+      // newX/newY becomes the new current point; contour starts on next D01
+    } else {
+      // D03 or others are not allowed in region mode; ignore safely
     }
+
     state.x = newX;
     state.y = newY;
     return;
   }
 
-  // Normal drawing / move / flash
+  // Normal drawing / move / flash (outside regions)
   const prevX = state.x;
   const prevY = state.y;
 
@@ -330,24 +363,23 @@ function handleCommandLine(line: string, state: ParserState) {
     return;
   }
 
-    if (dCode === 3) {
-        // Flash
-        if (state.currentAperture) {
-            const d =
-            state.currentAperture.diameterMm !== undefined
-                ? state.currentAperture.diameterMm
-                : DEFAULT_FLASH_DIAM_MM;
+  if (dCode === 3) {
+    // Flash
+    if (state.currentAperture) {
+      const d =
+        state.currentAperture.diameterMm !== undefined
+          ? state.currentAperture.diameterMm
+          : DEFAULT_FLASH_DIAM_MM;
 
-            state.flashes.push({
-                position: { x: newX, y: newY },
-                diameterMm: d,
-            });
-        }
-        state.x = newX;
-        state.y = newY;
-        return;
+      state.flashes.push({
+        position: { x: newX, y: newY },
+        diameterMm: d,
+      });
     }
-
+    state.x = newX;
+    state.y = newY;
+    return;
+  }
 
   // Other D codes ignored for now
 }

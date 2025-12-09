@@ -1,76 +1,111 @@
-// src/geometry/polygonizer.ts
-
 import type { Vec2, Polygon } from "../types/pcb-model";
 import type {
   GerberPrimitives,
   GerberPrimitiveTrack,
+  GerberPrimitiveArc,
   GerberPrimitiveFlash,
   GerberPrimitiveRegion,
 } from "../parse/gerber-parser";
 
-const DEFAULT_TRACE_WIDTH_MM = 0.2;   // fallback if needed
-const DEFAULT_FLASH_DIAM_MM = 0.8;    // fallback pad diameter
+// Reasonable defaults
+const DEFAULT_TRACE_WIDTH_MM = 0.2;
+const DEFAULT_FLASH_DIAM_MM = 0.8;
 const DEFAULT_CIRCLE_SEGMENTS = 32;
 
-// Epsilon for joining endpoints (in mm)
+// For endpoint matching in polyline building (mm^2)
 const POINT_JOIN_EPS = 1e-3;
 
-// ---------- Public API ----------
+// -----------------------------------------------------------------------------
+// Public API
+// -----------------------------------------------------------------------------
 
 export function polygonizePrimitives(prims: GerberPrimitives): Polygon[] {
   const polygons: Polygon[] = [];
 
-  // 1) Traces -> polylines -> stroked polygons
-  const polylines = buildPolylines(prims.tracks || []);
-  for (const pl of polylines) {
-    const poly = strokePolyline(pl.points, pl.width);
-    if (poly) polygons.push(poly);
+  // 1) Tracks -> polylines -> stroked polygons
+  if (prims.tracks && prims.tracks.length) {
+    const polylines = buildPolylines(prims.tracks);
+    for (const pl of polylines) {
+      const poly = strokePolyline(pl.points, pl.width);
+      if (poly) polygons.push(poly);
+    }
   }
 
-  // 2) Flashes -> circular pads
-  for (const flash of prims.flashes || []) {
-    const d = flash.diameterMm && flash.diameterMm > 0
-      ? flash.diameterMm
-      : DEFAULT_FLASH_DIAM_MM;
-    const circle = approximateCircle(flash.position, d / 2, DEFAULT_CIRCLE_SEGMENTS);
-    polygons.push(circle);
+  // 2) Arcs (currently ignored - parser does not emit arcs yet)
+  // If you start filling prims.arcs, you can approximate each arc by a
+  // centerline polyline and call strokePolyline on it as well.
+
+  // 3) Flashes -> circular pads
+  if (prims.flashes && prims.flashes.length) {
+    for (const flash of prims.flashes) {
+      const d =
+        flash.diameterMm && flash.diameterMm > 0
+          ? flash.diameterMm
+          : DEFAULT_FLASH_DIAM_MM;
+      const circle = approximateCircle(
+        flash.position,
+        d / 2,
+        DEFAULT_CIRCLE_SEGMENTS
+      );
+      polygons.push(circle);
+    }
   }
 
-  // 3) Regions -> as-is
-  for (const region of prims.regions || []) {
-    if (!region.boundary || region.boundary.length < 3) continue;
-    const outer = [...region.boundary];
-    const holes = (region.holes || []).map(h => [...h]);
-    polygons.push({ outer, holes });
+  // 4) Regions -> boundary + holes (from fixed parser)
+  if (prims.regions && prims.regions.length) {
+    for (const region of prims.regions) {
+      if (!region.boundary || region.boundary.length < 3) continue;
+
+      // The parser guarantees that boundary is first and holes are
+      // subsequent contours separated by D02 inside G36/G37.
+      const outer = ensureClockwise(region.boundary.slice());
+      const holes = (region.holes || []).map((h) =>
+        ensureCounterClockwise(h.slice())
+      );
+
+      polygons.push({ outer, holes });
+    }
   }
 
   return polygons;
 }
 
-// ---------- Polyline building from tracks ----------
+// -----------------------------------------------------------------------------
+// Polyline building from tracks
+// -----------------------------------------------------------------------------
 
 interface Polyline {
   points: Vec2[];
   width: number;
 }
 
+// Quantize helper for node-map key
+function keyOf(p: Vec2): string {
+  return `${Math.round(p.x * 1000)}:${Math.round(p.y * 1000)}`;
+}
+
+function isSamePoint(a: Vec2, b: Vec2): boolean {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return dx * dx + dy * dy <= POINT_JOIN_EPS * POINT_JOIN_EPS;
+}
+
 function buildPolylines(tracks: GerberPrimitiveTrack[]): Polyline[] {
   if (!tracks.length) return [];
 
-  // Quantize point to reduce floating noise
-  const keyOf = (p: Vec2) =>
-    `${Math.round(p.x * 1000)}:${Math.round(p.y * 1000)}`;
-
   // Map endpoint -> list of incident track indices + which end
-  const nodeMap = new Map<string, { idx: number; end: "start" | "end" }[]>();
+  const nodeMap = new Map<
+    string,
+    { idx: number; end: "start" | "end" }[]
+  >();
 
   tracks.forEach((t, idx) => {
-    const kStart = keyOf(t.start);
-    const kEnd = keyOf(t.end);
-    if (!nodeMap.has(kStart)) nodeMap.set(kStart, []);
-    if (!nodeMap.has(kEnd)) nodeMap.set(kEnd, []);
-    nodeMap.get(kStart)!.push({ idx, end: "start" });
-    nodeMap.get(kEnd)!.push({ idx, end: "end" });
+    const ks = keyOf(t.start);
+    const ke = keyOf(t.end);
+    if (!nodeMap.has(ks)) nodeMap.set(ks, []);
+    if (!nodeMap.has(ke)) nodeMap.set(ke, []);
+    nodeMap.get(ks)!.push({ idx, end: "start" });
+    nodeMap.get(ke)!.push({ idx, end: "end" });
   });
 
   const visited = new Array(tracks.length).fill(false);
@@ -79,27 +114,22 @@ function buildPolylines(tracks: GerberPrimitiveTrack[]): Polyline[] {
   for (let i = 0; i < tracks.length; i++) {
     if (visited[i]) continue;
 
-    const t = tracks[i];
+    const t0 = tracks[i];
     visited[i] = true;
 
-    let points: Vec2[] = [t.start, t.end];
-    let width = t.width || DEFAULT_TRACE_WIDTH_MM;
+    let points: Vec2[] = [t0.start, t0.end];
+    const width = t0.width || DEFAULT_TRACE_WIDTH_MM;
 
-    // Extend backwards from start
-    points = extendPolyline(points, tracks, visited, nodeMap, true, width);
-    // Extend forwards from end
-    points = extendPolyline(points, tracks, visited, nodeMap, false, width);
+    // grow backwards from start
+    points = extendPolyline(points, tracks, visited, nodeMap, true);
+    // grow forwards from end
+    points = extendPolyline(points, tracks, visited, nodeMap, false);
 
-    // Compute effective width as max of all segments (we updated width inside extend)
-    width = computePolylineWidth(points, tracks, width);
-
-    // Deduplicate near-equal consecutive points
+    // clean up centerline
     points = dedupePoints(points);
-
-    // Simplify almost-straight runs to kill micro-kinks
     points = simplifyPolyline(points);
 
-    if (points.length >= 2 && width > 0) {
+    if (points.length >= 2) {
       polylines.push({ points, width });
     }
   }
@@ -112,37 +142,34 @@ function extendPolyline(
   tracks: GerberPrimitiveTrack[],
   visited: boolean[],
   nodeMap: Map<string, { idx: number; end: "start" | "end" }[]>,
-  fromStart: boolean,
-  widthRef: number
+  fromStart: boolean
 ): Vec2[] {
-  const keyOf = (p: Vec2) =>
-    `${Math.round(p.x * 1000)}:${Math.round(p.y * 1000)}`;
-
   let growing = true;
 
   while (growing) {
     growing = false;
+
     const pivot = fromStart ? points[0] : points[points.length - 1];
     const pivotKey = keyOf(pivot);
     const incidents = nodeMap.get(pivotKey) || [];
 
-    // Find an unvisited incident track that continues from this pivot
     let nextIdx = -1;
     let nextTrack: GerberPrimitiveTrack | null = null;
     let pivotIsStart = false;
 
     for (const inc of incidents) {
       if (visited[inc.idx]) continue;
-      const candidate = tracks[inc.idx];
-      if (isSamePoint(candidate.start, pivot)) {
+      const cand = tracks[inc.idx];
+
+      if (isSamePoint(cand.start, pivot)) {
         nextIdx = inc.idx;
-        nextTrack = candidate;
+        nextTrack = cand;
         pivotIsStart = true;
         break;
       }
-      if (isSamePoint(candidate.end, pivot)) {
+      if (isSamePoint(cand.end, pivot)) {
         nextIdx = inc.idx;
-        nextTrack = candidate;
+        nextTrack = cand;
         pivotIsStart = false;
         break;
       }
@@ -151,35 +178,18 @@ function extendPolyline(
     if (nextIdx === -1 || !nextTrack) break;
 
     visited[nextIdx] = true;
-
-    // Decide orientation so we always append the "other" endpoint
     const other = pivotIsStart ? nextTrack.end : nextTrack.start;
 
     if (fromStart) {
-      // prepend at the front
       points.unshift(other);
     } else {
-      // append at the back
       points.push(other);
     }
 
-    widthRef = Math.max(widthRef, nextTrack.width || DEFAULT_TRACE_WIDTH_MM);
     growing = true;
   }
 
   return points;
-}
-
-function computePolylineWidth(points: Vec2[], tracks: GerberPrimitiveTrack[], baseWidth: number): number {
-  // For now just return baseWidth; you could walk tracks near these points
-  // and compute a more precise max width if needed.
-  return baseWidth || DEFAULT_TRACE_WIDTH_MM;
-}
-
-function isSamePoint(a: Vec2, b: Vec2): boolean {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return dx * dx + dy * dy <= POINT_JOIN_EPS * POINT_JOIN_EPS;
 }
 
 function dedupePoints(pts: Vec2[]): Vec2[] {
@@ -193,131 +203,25 @@ function dedupePoints(pts: Vec2[]): Vec2[] {
   return out;
 }
 
-// ---------- Stroke a centerline polyline into a polygon ----------
-
-function strokePolyline(points: Vec2[], width: number): Polygon | null {
-  if (points.length < 2 || width <= 0) return null;
-
-  const n = points.length - 1;
-  const half = width / 2;
-
-  // Segment directions (normalized)
-  const segDirs: Vec2[] = [];
-  for (let i = 0; i < n; i++) {
-    const p0 = points[i];
-    const p1 = points[i + 1];
-    const dx = p1.x - p0.x;
-    const dy = p1.y - p0.y;
-    const len = Math.hypot(dx, dy);
-    if (len < 1e-6) {
-      segDirs.push({ x: 0, y: 0 });
-    } else {
-      segDirs.push({ x: dx / len, y: dy / len });
-    }
-  }
-
-  const left: Vec2[] = [];
-  const right: Vec2[] = [];
-
-  const leftNormal = (d: Vec2): Vec2 => ({ x: -d.y, y: d.x });
-
-  // Maximum allowed miter extension relative to half-width
-  const MITER_LIMIT = 4; // you can tweak; 4 means up to 4x half-width
-
-  for (let i = 0; i <= n; i++) {
-    const p = points[i];
-
-    let nLeft: Vec2;
-
-    if (i === 0) {
-      // Start cap: just use first segment direction
-      const d = segDirs[0];
-      const ln = leftNormal(d);
-      nLeft = { x: ln.x, y: ln.y };
-    } else if (i === n) {
-      // End cap: just use last segment direction
-      const d = segDirs[n - 1];
-      const ln = leftNormal(d);
-      nLeft = { x: ln.x, y: ln.y };
-    } else {
-      // Interior vertex
-      const dPrev = segDirs[i - 1];
-      const dNext = segDirs[i];
-
-      // If one of these is degenerate, just use the other
-      if ((dPrev.x === 0 && dPrev.y === 0) && (dNext.x === 0 && dNext.y === 0)) {
-        nLeft = { x: 0, y: 1 }; // arbitrary
-      } else if (dPrev.x === 0 && dPrev.y === 0) {
-        nLeft = leftNormal(dNext);
-      } else if (dNext.x === 0 && dNext.y === 0) {
-        nLeft = leftNormal(dPrev);
-      } else {
-        const nPrev = leftNormal(dPrev);
-        const nNext = leftNormal(dNext);
-
-        // Sum normals -> bisector
-        let mx = nPrev.x + nNext.x;
-        let my = nPrev.y + nNext.y;
-        let mLen = Math.hypot(mx, my);
-
-        // If sum is tiny (straight or 180 deg), fallback to simple normal
-        if (mLen < 1e-4) {
-          nLeft = { x: nPrev.x, y: nPrev.y };
-        } else {
-          mx /= mLen;
-          my /= mLen;
-
-          // Project onto nPrev to compute miter scale
-          const dot = mx * nPrev.x + my * nPrev.y;
-
-          // If dot is tiny, angle is very acute - use bevel join
-          if (Math.abs(dot) < 1e-3) {
-            nLeft = { x: nPrev.x, y: nPrev.y };
-          } else {
-            let scale = 1 / dot;
-
-            // Clamp miter length so we don't explode on sharp angles
-            if (Math.abs(scale) > MITER_LIMIT) {
-              // Bevel join fallback
-              nLeft = { x: nPrev.x, y: nPrev.y };
-            } else {
-              nLeft = { x: mx * scale, y: my * scale };
-            }
-          }
-        }
-      }
-    }
-
-    // Normalize and scale to half-width
-    const len = Math.hypot(nLeft.x, nLeft.y) || 1;
-    const sx = (nLeft.x / len) * half;
-    const sy = (nLeft.y / len) * half;
-
-    left.push({ x: p.x + sx, y: p.y + sy });
-    right.push({ x: p.x - sx, y: p.y - sy });
-  }
-
-  if (left.length < 2 || right.length < 2) return null;
-
-  const outer: Vec2[] = [...left, ...right.reverse()];
-  return { outer, holes: [] };
-}
-
+/**
+ * Merge nearly straight runs and drop tiny jitter segments.
+ * This keeps the topology but removes CAM noise so the stroker
+ * sees a clean polyline.
+ */
 function simplifyPolyline(
   pts: Vec2[],
-  angleEpsDeg = 2,      // how "straight" we consider straight
-  minSegLen = 1e-4      // minimum segment length in mm
+  angleEpsDeg = 2,
+  minSegLen = 1e-4
 ): Vec2[] {
   if (pts.length <= 2) return pts.slice();
 
   const angleEps = (angleEpsDeg * Math.PI) / 180;
-
   const out: Vec2[] = [pts[0]];
 
   let prev = pts[0];
-
-  // Find first non-zero length segment direction
   let prevDir: Vec2 | null = null;
+
+  // find first non-degenerate direction
   for (let i = 1; i < pts.length; i++) {
     const dx = pts[i].x - prev.x;
     const dy = pts[i].y - prev.y;
@@ -331,7 +235,6 @@ function simplifyPolyline(
   }
 
   if (!prevDir) {
-    // Everything is basically one point
     return [pts[0], pts[pts.length - 1]];
   }
 
@@ -341,31 +244,25 @@ function simplifyPolyline(
     const dy = curr.y - prev.y;
     const len = Math.hypot(dx, dy);
 
-    if (len < minSegLen) {
-      // Too short to matter, just skip
-      continue;
-    }
+    if (len < minSegLen) continue;
 
     const dir = { x: dx / len, y: dy / len };
-    // Angle between prevDir and dir
     const dot = prevDir.x * dir.x + prevDir.y * dir.y;
     const clampedDot = Math.min(1, Math.max(-1, dot));
     const angle = Math.acos(clampedDot);
 
     if (Math.abs(angle) < angleEps) {
-      // Nearly colinear: extend the previous segment instead of adding a kink
+      // nearly straight: extend
       prev = curr;
       out[out.length - 1] = curr;
-      // Keep prevDir as-is
     } else {
-      // Real corner
+      // real corner
       prev = curr;
       prevDir = dir;
       out.push(curr);
     }
   }
 
-  // Guarantee at least two points
   if (out.length < 2) {
     return [pts[0], pts[pts.length - 1]];
   }
@@ -373,8 +270,183 @@ function simplifyPolyline(
   return out;
 }
 
+// -----------------------------------------------------------------------------
+// Stroke a centerline polyline into a polygon (composite shape union)
+// -----------------------------------------------------------------------------
 
-// ---------- Circle / pad approximation ----------
+function strokePolyline(points: Vec2[], width: number): Polygon | null {
+  if (points.length < 2 || width <= 0) return null;
+
+  const n = points.length - 1;
+  const half = width / 2;
+  const CAP_SEGMENTS = 8;
+  const MITER_LIMIT = 4;
+
+  const startPt = points[0];
+  const endPt = points[n];
+
+  const leftNormal = (d: Vec2): Vec2 => ({ x: -d.y, y: d.x });
+  const rightNormal = (d: Vec2): Vec2 => ({ x: d.y, y: -d.x });
+
+  // 1. Compute segment directions
+  const segDirs: Vec2[] = [];
+  for (let i = 0; i < n; i++) {
+    const p0 = points[i];
+    const p1 = points[i + 1];
+    const dx = p1.x - p0.x;
+    const dy = p1.y - p0.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-9) {
+      segDirs.push({ x: 0, y: 0 });
+    } else {
+      segDirs.push({ x: dx / len, y: dy / len });
+    }
+  }
+
+  // Helper to compute a single miter point (or max-miter point)
+  function computeMiter(dPrev: Vec2, dNext: Vec2, isLeft: boolean): Vec2 {
+    const nPrev = isLeft ? leftNormal(dPrev) : rightNormal(dPrev);
+    const nNext = isLeft ? leftNormal(dNext) : rightNormal(dNext);
+
+    let mx = nPrev.x + nNext.x;
+    let my = nPrev.y + nNext.y;
+    let mLen = Math.hypot(mx, my);
+
+    if (mLen < 1e-6) {
+        return nPrev;
+    }
+
+    mx /= mLen;
+    my /= mLen;
+
+    const dot = mx * nPrev.x + my * nPrev.y;
+
+    if (Math.abs(dot) < 1e-3) {
+      return nPrev;
+    }
+
+    let scaleFactor = 1 / dot;
+
+    if (Math.abs(scaleFactor) > MITER_LIMIT) {
+      // Bevel joint: use the miter limit
+      return scale({ x: mx, y: my }, Math.sign(scaleFactor) * MITER_LIMIT);
+    }
+
+    return scale({ x: mx, y: my }, scaleFactor);
+  }
+
+
+  // --- PART 1: STROKE BODY (Flat Caps) ---
+  const leftBody: Vec2[] = [];
+  const rightBody: Vec2[] = [];
+
+  // Start point (flat cap vertices)
+  const nStart = leftNormal(segDirs[0]);
+  leftBody.push(add(startPt, scale(nStart, half)));
+  rightBody.push(add(startPt, scale(rightNormal(segDirs[0]), half)));
+
+  // Interior joints
+  for (let i = 1; i < n; i++) {
+    const p = points[i];
+    const dPrev = segDirs[i - 1];
+    const dNext = segDirs[i];
+
+    // Left side
+    const miterL = computeMiter(dPrev, dNext, true);
+    leftBody.push(add(p, scale(miterL, half)));
+
+    // Right side (built in start-to-end order, but stored separately)
+    const miterR = computeMiter(dPrev, dNext, false);
+    rightBody.push(add(p, scale(miterR, half)));
+  }
+
+  // End point (flat cap vertices)
+  const nEnd = leftNormal(segDirs[n - 1]);
+  leftBody.push(add(endPt, scale(nEnd, half)));
+  rightBody.push(add(endPt, scale(rightNormal(segDirs[n - 1]), half)));
+
+  // --- PART 2: START CAP ---
+  const startCapOuter: Vec2[] = [];
+  const startDir = segDirs[0];
+  const startCapCenter = startPt;
+
+  // The start cap connects the leftBody[0] point to the rightBody[0] point.
+  // We use the normal of the first segment to define the semicircle.
+  const rightStartOffset = rightNormal(startDir);
+  const startAngle = Math.atan2(rightStartOffset.y, rightStartOffset.x);
+
+  // Sweep 180 degrees from right side (theta=0) to left side (theta=PI)
+  for (let i = 0; i <= CAP_SEGMENTS; i++) {
+    const theta = startAngle + (i / CAP_SEGMENTS) * Math.PI;
+    startCapOuter.push({
+      x: startCapCenter.x + Math.cos(theta) * half,
+      y: startCapCenter.y + Math.sin(theta) * half,
+    });
+  }
+
+  // --- PART 3: END CAP ---
+  const endCapOuter: Vec2[] = [];
+  const endDir = segDirs[n - 1];
+  const endCapCenter = endPt;
+
+  // The end cap connects the leftBody[end] point to the rightBody[end] point.
+  // We use the normal of the last segment to define the semicircle.
+  const leftEndOffset = leftNormal(endDir);
+  const endAngle = Math.atan2(leftEndOffset.y, leftEndOffset.x);
+
+  // Sweep 180 degrees from left side (theta=0) to right side (theta=PI)
+  for (let i = 0; i <= CAP_SEGMENTS; i++) {
+    const theta = endAngle + (i / CAP_SEGMENTS) * Math.PI;
+    endCapOuter.push({
+      x: endCapCenter.x + Math.cos(theta) * half,
+      y: endCapCenter.y + Math.sin(theta) * half,
+    });
+  }
+
+  // --- PART 4: COMBINE AND FINALIZE (Guaranteed Clockwise Winding) ---
+
+  // Build the outer boundary:
+  // 1. Left side (Start -> End)
+  // 2. End Cap (Left side -> Right side)
+  // 3. Right side (End -> Start, so must be reversed)
+  // 4. Start Cap (Right side -> Left side, so must be reversed)
+
+// --- PART 4: COMBINE AND FINALIZE (Refined Concatenation) ---
+
+  // Build the outer boundary:
+  // 1. Left side (Start -> End)
+  // 2. End Cap (Left side -> Right side, excluding start/end overlap points)
+  // 3. Right side (End -> Start, reversed)
+  // 4. Start Cap (Right side -> Left side, reversed, excluding start/end overlap points)
+
+  const finalOuter = [
+    // 1. Left Body (Start -> End)
+    ...leftBody, 
+
+    // 2. End Cap (Skip first and last point, as they are body points)
+    // The cap points are: B, B1, B2, ..., C
+    // We want B1, B2, ... 
+    ...endCapOuter.slice(1, -1), 
+
+    // 3. Right Body (End -> Start) - REVERSED
+    ...rightBody.slice().reverse(), 
+
+    // 4. Start Cap (Skip first and last point, as they are body points)
+    // The cap points are: D, D1, D2, ..., A
+    // We reverse it, so it's A, ..., D2, D1. We want ..., D2, D1 (excluding A and D)
+    ...startCapOuter.slice(1, -1).reverse(),
+  ];
+
+  if (finalOuter.length < 3) return null;
+
+  // The final dedupe will handle any residual floating-point duplicates, 
+  // but slicing removes the guaranteed-duplicate points first.
+  return { outer: ensureClockwise(dedupePoints(finalOuter)), holes: [] };
+}
+
+// -----------------------------------------------------------------------------
+// Circle / pad approximation
+// -----------------------------------------------------------------------------
 
 function approximateCircle(
   center: Vec2,
@@ -382,8 +454,9 @@ function approximateCircle(
   segments: number
 ): Polygon {
   const outer: Vec2[] = [];
+  // clockwise winding
   for (let i = 0; i < segments; i++) {
-    const theta = (i / segments) * Math.PI * 2;
+    const theta = -(i / segments) * Math.PI * 2;
     outer.push({
       x: center.x + Math.cos(theta) * radiusMm,
       y: center.y + Math.sin(theta) * radiusMm,
@@ -391,3 +464,52 @@ function approximateCircle(
   }
   return { outer, holes: [] };
 }
+
+// -----------------------------------------------------------------------------
+// Winding helpers
+// -----------------------------------------------------------------------------
+
+function computeSignedArea(points: Vec2[]): number {
+  let sum = 0;
+  for (let i = 0; i < points.length; i++) {
+    const j = (i + 1) % points.length;
+    sum += (points[j].x - points[i].x) * (points[j].y + points[i].y);
+  }
+  return sum / 2;
+}
+
+function ensureClockwise(points: Vec2[]): Vec2[] {
+  if (points.length < 3) return points;
+  const area = computeSignedArea(points);
+  return area < 0 ? points : points.slice().reverse();
+}
+
+function ensureCounterClockwise(points: Vec2[]): Vec2[] {
+  if (points.length < 3) return points;
+  const area = computeSignedArea(points);
+  return area > 0 ? points : points.slice().reverse();
+}
+
+// -----------------------------------------------------------------------------
+// Vec helpers
+// -----------------------------------------------------------------------------
+
+function add(a: Vec2, b: Vec2): Vec2 {
+  return { x: a.x + b.x, y: a.y + b.y };
+}
+
+function scale(v: Vec2, s: number): Vec2 {
+  return { x: v.x * s, y: v.y * s };
+}
+
+// Rotates vector d by angle (in radians) (currently unused but good helper)
+/*
+function rotate(d: Vec2, angle: number): Vec2 {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: d.x * cos - d.y * sin,
+    y: d.x * sin + d.y * cos,
+  };
+}
+*/
