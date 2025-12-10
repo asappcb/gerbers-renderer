@@ -46,12 +46,13 @@ export class Viewer3D {
       5000
     );
 
-    addDefaultLights(this.scene);
+    addDefaultLights(this.scene, this.renderer);
 
     this.sceneBuild = buildPcbScene(geometry, {
       usePbrMaterials: options.usePbrMaterials,
+      bakedTextureSize: 4096
     });
-    this.scene.add(this.sceneBuild.rootGroup);
+    this.scene.add(this.sceneBuild.group);
 
     this.controls = createOrbitControls(this.camera, canvas);
 

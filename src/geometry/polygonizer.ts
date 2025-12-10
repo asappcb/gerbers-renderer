@@ -109,8 +109,50 @@ export function polygonizePrimitivesUnion(prims: GerberPrimitives): Polygon[] {
 }
 
 // -----------------------------------------------------------------------------
-// Boolean union helpers (using polygon-clipping)
+// Boolean operation helpers (using polygon-clipping)
 // -----------------------------------------------------------------------------
+
+// Convert a list of Polygons to one MultiPolygon
+function polygonsToMulti(polys: Polygon[]): PcLibMultiPolygon {
+  const mp: PcLibMultiPolygon = [];
+
+  for (const p of polys) {
+    const pcPoly = toPcPolygon(p);
+    if (pcPoly) {
+      mp.push(pcPoly);
+    }
+  }
+
+  return mp;
+}
+
+// Subtract subtrahend polygons from minuend polygons
+// Returns minuend - subtrahend
+// If either input is empty, returns the minuend as-is
+// If the result is empty, returns an empty array
+export function subtractPolygons(
+  minuend: Polygon[],    // e.g. board outline
+  subtrahend: Polygon[], // e.g. mask openings
+): Polygon[] {
+  if (!minuend.length) return [];
+
+  const mpA = polygonsToMulti(minuend);
+  if (!mpA.length) return [];
+
+  const mpB = polygonsToMulti(subtrahend);
+
+  const diff = (mpB.length
+    ? polygonClipping.difference(
+        mpA as unknown as PcLibMultiPolygon,
+        mpB as unknown as PcLibMultiPolygon,
+      )
+    : mpA) as PcLibMultiPolygon | null;
+
+  if (!diff || !diff.length) return [];
+
+  return fromPcMulti(diff);
+}
+
 // -----------------------------------------------------------------------------
 // Boolean union helpers (using polygon-clipping)
 // -----------------------------------------------------------------------------
