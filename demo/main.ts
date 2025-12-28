@@ -3,9 +3,15 @@ import { createBoardViewer, renderGerbersZip } from "../src";
 let viewer: ReturnType<typeof createBoardViewer> | null = null;
 let lastRevoke: (() => void) | null = null;
 
-const inputEl = document.getElementById("file-input") as HTMLInputElement;
-const host = document.getElementById("pcb-host") as HTMLDivElement;
-const statusEl = document.getElementById("status") as HTMLSpanElement;
+const inputEl = document.getElementById("file-input") as HTMLInputElement | null;
+const statusEl = document.getElementById("status") as HTMLSpanElement | null;
+const host = document.getElementById("pcb-host") as HTMLDivElement | null;
+
+if (!inputEl || !statusEl || !host) {
+  throw new Error(
+    "Demo page missing required elements (#file-input, #status, #pcb-host). Are you on /demo/index.html?"
+  );
+}
 
 inputEl.addEventListener("change", async (e) => {
   const file = (e.target as HTMLInputElement).files?.[0];
