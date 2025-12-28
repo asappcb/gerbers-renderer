@@ -3,7 +3,7 @@
 import type { RenderFromZipOptions, LoadFromZipOptions } from "../types/options";
 import type { PcbModelGeometry } from "../types/pcb-model";
 import { loadPcbGeometryFromZip as loadGeometry } from "./pipeline";
-import { Viewer3D } from "../render/three/viewer-3d";
+// import { Viewer3D } from "../render/three/viewer-3d";
 
 /**
  * Thin wrapper around the pipeline to expose a nice geometry loader.
