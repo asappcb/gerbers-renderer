@@ -2,6 +2,8 @@ import { createBoardViewer, renderGerbersZip } from "../src";
 
 let viewer: ReturnType<typeof createBoardViewer> | null = null;
 let lastRevoke: (() => void) | null = null;
+let lastOut: any = null;
+let lastZipFile: File | null = null;
 
 const inputEl = document.getElementById("file-input") as HTMLInputElement | null;
 const statusEl = document.getElementById("status") as HTMLSpanElement | null;
@@ -17,18 +19,36 @@ inputEl.addEventListener("change", async (e) => {
   const file = (e.target as HTMLInputElement).files?.[0];
   if (!file) return;
 
+  lastZipFile = file;
+
   // cleanup
   if (lastRevoke) lastRevoke();
   lastRevoke = null;
 
   if (!viewer) {
-    viewer = createBoardViewer(host);
+    viewer = createBoardViewer(host, {
+      onDownload: () => {
+        if (!lastZipFile) return;
+
+        const a = document.createElement("a");
+        const url = URL.createObjectURL(lastZipFile);
+
+        a.href = url;
+        a.download = lastZipFile.name || "gerbers.zip";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+
+        URL.revokeObjectURL(url);
+      },
+    });
   }
 
   statusEl.textContent = "Loading gerbers.zip...";
 
   try {
     const out = await renderGerbersZip(file);
+    lastOut = out;
     lastRevoke = out.revoke;
 
     viewer.setData({ boardGeom: out.boardGeom, layers: out.layers });

@@ -31,7 +31,7 @@ export type ViewerLayers = Partial<{
   bottom_board_mask: string;
 }>;
 
-export type ViewerSideMode = "top" | "bottom" | "both";
+export type ViewerSideMode = "top" | "bottom";
 
 export type BoardViewer = {
   setData: (data: { boardGeom: BoardGeom; layers: ViewerLayers }) => void;

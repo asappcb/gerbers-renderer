@@ -151,8 +151,15 @@ function mmToPx(mm: number): number {
 
 // Convert world-mm -> local-mm (0..W, 0..H) by subtracting min bounds
 function toLocalMm(x: number, y: number, b: BoundsMm) {
-  return { x: x - b.minX, y: y - b.minY };
+  // X: left->right
+  const lx = x - b.minX;
+
+  // Y: invert so Gerber +Y up becomes SVG +Y down
+  const ly = b.maxY - y;
+
+  return { x: lx, y: ly };
 }
+
 
 // SVG builders
 
@@ -400,21 +407,25 @@ export async function renderGerbersZip(file: File): Promise<RenderResult> {
   const topSilkPrimsN = topSilkPrims ? scaleGerberPrims(topSilkPrims, topSilkScale) : null;
   const botSilkPrimsN = botSilkPrims ? scaleGerberPrims(botSilkPrims, botSilkScale) : null;
 
-  // Compute bounds: outline preferred, else union of copper + drills + silk
-  let b = initBounds();
-  if (outPrimsN) b = mergeBounds(b, boundsFromGerber(outPrimsN));
-  if (topPrimsN) b = mergeBounds(b, boundsFromGerber(topPrimsN));
-  if (botPrimsN) b = mergeBounds(b, boundsFromGerber(botPrimsN));
-  if (topSilkPrimsN) b = mergeBounds(b, boundsFromGerber(topSilkPrimsN));
-  if (botSilkPrimsN) b = mergeBounds(b, boundsFromGerber(botSilkPrimsN));
+// Board bounds: outline preferred (true board extents). Otherwise fall back to copper only.
+// IMPORTANT: do NOT allow silk/drills to expand the board size.
+let boardB: BoundsMm | null = null;
 
-  // For now, only include drills in bounds if they're not crazy
-  if (drillHolesN.length) {
-    const db = boundsFromDrills(drillHolesN);
-    if (isSaneBounds(db)) b = mergeBounds(b, db);
-  }
+if (outPrimsN) {
+  const ob = ensureFiniteBounds(boundsFromGerber(outPrimsN));
+  if (isSaneBounds(ob)) boardB = ob;
+}
 
-  b = ensureFiniteBounds(b);
+if (!boardB) {
+  let cb = initBounds();
+  if (topPrimsN) cb = mergeBounds(cb, boundsFromGerber(topPrimsN));
+  if (botPrimsN) cb = mergeBounds(cb, boundsFromGerber(botPrimsN));
+  cb = ensureFiniteBounds(cb);
+  boardB = cb;
+}
+
+// Final safety
+const b = ensureFiniteBounds(boardB!);
 
   const widthMm = b.maxX - b.minX;
   const heightMm = b.maxY - b.minY;
@@ -432,8 +443,8 @@ export async function renderGerbersZip(file: File): Promise<RenderResult> {
     },
   };
 
-  const wPx = Math.round(mmToPx(widthMm));
-  const hPx = Math.round(mmToPx(heightMm));
+  const wPx = Math.max(1, Math.round(mmToPx(widthMm)));
+  const hPx = Math.max(1, Math.round(mmToPx(heightMm)));
 
   const urls: string[] = [];
   const addSvg = (svg: string) => {

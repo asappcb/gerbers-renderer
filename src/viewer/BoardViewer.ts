@@ -27,34 +27,56 @@ function mustGet<T extends HTMLElement>(root: HTMLElement, selector: string): T 
   return el as T;
 }
 
-export function createBoardViewer(host: HTMLElement): BoardViewer {
+export type BoardViewerOptions = {
+  onDownload?: () => void;
+};
+
+export function createBoardViewer(host: HTMLElement, opts: BoardViewerOptions = {}): BoardViewer {
+  const downloadIcon = `
+<svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+  <path d="M12 3v10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M8 11l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M4 17v3h16v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+</svg>
+`;
+
   host.innerHTML = `
     <div class="board-viewer-root">
       <div class="viewer-header">
         <div class="viewer-header-left">
-          <p class="viewer-header-title">Board view</p>
-          <p class="viewer-header-sub">Scroll to zoom, drag to pan.</p>
+          <p class="viewer-header-title">Board viewer</p>
+          <p class="viewer-header-sub" id="viewer-subtitle">Scroll to zoom, drag to pan</p>
         </div>
 
-        <div class="layer-toggles">
-          <label><input type="radio" name="side" value="top" checked /> Top</label>
-          <label><input type="radio" name="side" value="bottom" /> Bottom</label>
-          <label><input type="radio" name="side" value="both" /> Both</label>
+        <div class="viewer-header-right">
+          <div class="controls">
+            <div class="segment" title="Side">
+              <input id="side-top" type="radio" name="side" value="top" checked />
+              <label for="side-top">Top</label>
 
-          <label style="margin-left: 10px;">
-            <input type="checkbox" id="grid-toggle" />
-            Grid
-          </label>
+              <input id="side-bottom" type="radio" name="side" value="bottom" />
+              <label for="side-bottom">Bottom</label>
+            </div>
 
-          <label style="gap: 6px;">
-            Units:
-            <select id="grid-units">
-              <option value="in" selected>in</option>
-              <option value="mm">mm</option>
-            </select>
-          </label>
+            <label class="toggle" title="Grid">
+              <input type="checkbox" id="grid-toggle" />
+              Grid
+            </label>
 
-          <button id="fit-btn" style="margin-left: 10px; font-size: 11px;">Fit</button>
+            <div class="select" title="Grid units">
+              Units
+              <select id="grid-units">
+                <option value="in" selected>in</option>
+                <option value="mm">mm</option>
+              </select>
+            </div>
+
+            <button class="btn" id="fit-btn" type="button" title="Fit to viewport">Fit</button>
+            <button class="btn btn-primary" id="download-btn" type="button" title="Download">
+              ${downloadIcon}
+              Download
+            </button>
+          </div>
         </div>
       </div>
 
@@ -64,20 +86,18 @@ export function createBoardViewer(host: HTMLElement): BoardViewer {
           <div id="board-content">
             <div id="board-stage">
               <div class="board-clip" id="boardClip">
-                <!-- FR4 Base: use top copper if present -->
-                <img class="layer fr4" id="img-fr4" alt="FR4" />
+                <div class="layer-frame" id="layer-fr4" style="z-index:0;">
+                  <img class="layer fr4" id="img-fr4" alt="FR4" />
+                </div>
 
-                <!-- Bottom stack -->
                 <div class="layer-frame" id="layer-bottom-copper"><img class="layer" id="img-bottom-copper" alt="Bottom copper" /></div>
                 <div class="layer-frame" id="layer-bottom-mask"><img class="layer" id="img-bottom-mask" alt="Bottom mask" /></div>
                 <div class="layer-frame" id="layer-bottom-silk"><img class="layer" id="img-bottom-silk" alt="Bottom silk" /></div>
 
-                <!-- Top stack -->
                 <div class="layer-frame" id="layer-top-copper"><img class="layer" id="img-top-copper" alt="Top copper" /></div>
                 <div class="layer-frame" id="layer-top-mask"><img class="layer" id="img-top-mask" alt="Top mask" /></div>
                 <div class="layer-frame" id="layer-top-silk"><img class="layer" id="img-top-silk" alt="Top silk" /></div>
 
-                <!-- Overlays -->
                 <div class="layer-frame" id="layer-drills"><img class="layer" id="img-drills" alt="Drills" /></div>
                 <div class="layer-frame" id="layer-vias"><img class="layer" id="img-vias" alt="Vias" /></div>
               </div>
@@ -100,6 +120,7 @@ export function createBoardViewer(host: HTMLElement): BoardViewer {
   const gridToggle = mustGet<HTMLInputElement>(root, "#grid-toggle");
   const gridUnits = mustGet<HTMLSelectElement>(root, "#grid-units");
   const fitBtn = mustGet<HTMLButtonElement>(root, "#fit-btn");
+  const downloadBtn = mustGet<HTMLButtonElement>(root, "#download-btn");
 
   const radios = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="side"]'));
 
@@ -256,24 +277,20 @@ export function createBoardViewer(host: HTMLElement): BoardViewer {
   }
 
   function showSideMode(mode: ViewerSideMode) {
-    const showTop = mode === "top" || mode === "both";
-    const showBottom = mode === "bottom" || mode === "both";
+    const showTop = mode === "top";
+    const showBottom = mode === "bottom";
 
-    // Top
     setLayerFrameVisible("layer-top-copper", showTop && !!layers.top_copper);
     setLayerFrameVisible("layer-top-mask", showTop && !!layers.top_mask);
     setLayerFrameVisible("layer-top-silk", showTop && !!layers.top_silk);
 
-    // Bottom
     setLayerFrameVisible("layer-bottom-copper", showBottom && !!layers.bottom_copper);
     setLayerFrameVisible("layer-bottom-mask", showBottom && !!layers.bottom_mask);
     setLayerFrameVisible("layer-bottom-silk", showBottom && !!layers.bottom_silk);
 
-    // Overlays (drills/vias typically always visible)
     setLayerFrameVisible("layer-drills", !!layers.drills);
     setLayerFrameVisible("layer-vias", !!layers.vias);
 
-    // Switch board mask depending on side
     const maskUrl =
       mode === "bottom"
         ? (layers.bottom_board_mask ?? layers.top_board_mask)
@@ -349,6 +366,9 @@ export function createBoardViewer(host: HTMLElement): BoardViewer {
   });
   gridUnits.addEventListener("change", drawGrid);
   fitBtn.addEventListener("click", () => fitBoardToViewport(0.08));
+  downloadBtn.addEventListener("click", () => {
+    opts.onDownload?.();
+  });
 
   radios.forEach((r) => {
     r.addEventListener("change", () => {
