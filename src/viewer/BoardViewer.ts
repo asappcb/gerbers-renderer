@@ -10,6 +10,17 @@ function posMod(v: number, m: number) {
   return ((v % m) + m) % m;
 }
 
+function setImgSrc(img: HTMLImageElement, url?: string) {
+  if (url && url.startsWith("blob:")) {
+    img.setAttribute("src", url);
+  } else if (url && url.length > 0) {
+    // allow non-blob URLs too, if you ever use them
+    img.setAttribute("src", url);
+  } else {
+    img.removeAttribute("src"); // critical: prevents it defaulting to current document URL
+  }
+}
+
 function mustGet<T extends HTMLElement>(root: HTMLElement, selector: string): T {
   const el = root.querySelector(selector);
   if (!el) throw new Error(`Missing required element: ${selector}`);
@@ -245,23 +256,30 @@ export function createBoardViewer(host: HTMLElement): BoardViewer {
   }
 
   function showSideMode(mode: ViewerSideMode) {
-    const topOn = mode === "top" || mode === "both";
-    const bottomOn = mode === "bottom" || mode === "both";
+    const showTop = mode === "top" || mode === "both";
+    const showBottom = mode === "bottom" || mode === "both";
 
-    setLayerFrameVisible("layer-top-copper", topOn && !!layers.top_copper);
-    setLayerFrameVisible("layer-top-mask", topOn && !!layers.top_mask);
-    setLayerFrameVisible("layer-top-silk", topOn && !!layers.top_silk);
+    // Top
+    setLayerFrameVisible("layer-top-copper", showTop && !!layers.top_copper);
+    setLayerFrameVisible("layer-top-mask", showTop && !!layers.top_mask);
+    setLayerFrameVisible("layer-top-silk", showTop && !!layers.top_silk);
 
-    setLayerFrameVisible("layer-bottom-copper", bottomOn && !!layers.bottom_copper);
-    setLayerFrameVisible("layer-bottom-mask", bottomOn && !!layers.bottom_mask);
-    setLayerFrameVisible("layer-bottom-silk", bottomOn && !!layers.bottom_silk);
+    // Bottom
+    setLayerFrameVisible("layer-bottom-copper", showBottom && !!layers.bottom_copper);
+    setLayerFrameVisible("layer-bottom-mask", showBottom && !!layers.bottom_mask);
+    setLayerFrameVisible("layer-bottom-silk", showBottom && !!layers.bottom_silk);
 
+    // Overlays (drills/vias typically always visible)
     setLayerFrameVisible("layer-drills", !!layers.drills);
     setLayerFrameVisible("layer-vias", !!layers.vias);
 
-    // Use top or bottom board mask depending on side (matches result.html behavior)
-    const maskKey = mode === "bottom" ? layers.bottom_board_mask : layers.top_board_mask;
-    setBoardMask(maskKey ?? layers.top_board_mask ?? layers.bottom_board_mask);
+    // Switch board mask depending on side
+    const maskUrl =
+      mode === "bottom"
+        ? (layers.bottom_board_mask ?? layers.top_board_mask)
+        : (layers.top_board_mask ?? layers.bottom_board_mask);
+
+    if (maskUrl) setBoardMask(maskUrl);
   }
 
   function setStageFromGeometry() {
@@ -350,17 +368,17 @@ export function createBoardViewer(host: HTMLElement): BoardViewer {
     layers = data.layers;
 
     // images
-    imgTopCopper.src = layers.top_copper || "";
-    imgBottomCopper.src = layers.bottom_copper || "";
-    imgTopMask.src = layers.top_mask || "";
-    imgBottomMask.src = layers.bottom_mask || "";
-    imgTopSilk.src = layers.top_silk || "";
-    imgBottomSilk.src = layers.bottom_silk || "";
-    imgDrills.src = layers.drills || "";
-    imgVias.src = layers.vias || "";
+    setImgSrc(imgTopCopper, layers.top_copper);
+    setImgSrc(imgBottomCopper, layers.bottom_copper);
+    setImgSrc(imgTopMask, layers.top_mask);
+    setImgSrc(imgBottomMask, layers.bottom_mask);
+    setImgSrc(imgTopSilk, layers.top_silk);
+    setImgSrc(imgBottomSilk, layers.bottom_silk);
+    setImgSrc(imgDrills, layers.drills);
+    setImgSrc(imgVias, layers.vias);
 
-    // FR4 base reuses top copper (matches your template)
-    imgFr4.src = layers.top_copper || layers.bottom_copper || "";
+    // FR4 base
+    setImgSrc(imgFr4, layers.top_copper ?? layers.bottom_copper);
 
     setStageFromGeometry();
     resizeGridCanvas();
