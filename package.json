@@ -1,6 +1,6 @@
 {
   "name": "gerbers-renderer",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A frontend-only Gerber viewer for rendering PCB Gerbers directly in the browser.",
   "private": false,
   "type": "module",
@@ -16,7 +16,9 @@
   "unpkg": "./dist/gerbers-renderer.umd.js",
   "jsdelivr": "./dist/gerbers-renderer.umd.js",
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
     "dev": "vite",
