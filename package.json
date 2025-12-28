@@ -1,19 +1,27 @@
 {
   "name": "gerbers-renderer",
-  "version": "1.0.0",
-  "description": "Renders PCB Gerbers in 3D using Three.js",
+  "version": "0.1.0",
+  "description": "A frontend-only Gerber viewer for rendering PCB Gerbers directly in the browser.",
+  "private": false,
   "type": "module",
-  "main": "dist/index.cjs",
-  "module": "dist/index.mjs",
-  "types": "dist/index.d.ts",
+  "main": "./dist/gerbers-renderer.umd.js",
+  "module": "./dist/gerbers-renderer.es.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/gerbers-renderer.es.js",
+      "require": "./dist/gerbers-renderer.umd.js"
+    }
+  },
+  "unpkg": "./dist/gerbers-renderer.umd.js",
+  "jsdelivr": "./dist/gerbers-renderer.umd.js",
   "files": [
     "dist"
   ],
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "test": "echo \"No tests yet\""
+    "build": "vite build",
+    "preview": "vite preview"
   },
   "repository": {
     "type": "git",
@@ -22,9 +30,12 @@
   "keywords": [
     "pcb",
     "gerber",
-    "threejs",
+    "excellon",
+    "viewer",
     "renderer",
-    "webgl",
+    "frontend",
+    "browser",
+    "svg",
     "electronics"
   ],
   "author": "",
@@ -34,10 +45,7 @@
   },
   "homepage": "https://github.com/asappcb/gerbers-renderer#readme",
   "dependencies": {
-    "jszip": "^3.10.1",
-    "martinez-polygon-clipping": "^0.8.1",
-    "polygon-clipping": "^0.15.7",
-    "three": "^0.181.2"
+    "jszip": "^3.10.1"
   },
   "devDependencies": {
     "@types/jszip": "^3.4.0",
@@ -45,6 +53,7 @@
     "@types/three": "^0.181.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
-    "vite": "^7.2.7"
+    "vite": "^7.2.7",
+    "vite-plugin-dts": "^4.5.4"
   }
 }
