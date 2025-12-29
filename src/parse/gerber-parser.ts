@@ -8,10 +8,18 @@ import type { LayerRole } from "../io/file-classifier";
  * polygonizer.ts consumes.
  */
 
+export type Polarity = "dark" | "clear";
+
+export type Op =
+  | { kind: "track"; polarity: Polarity; start: Vec2; end: Vec2; widthMm: number }
+  | { kind: "flash"; polarity: Polarity; position: Vec2; diameterMm: number; shape: string; widthMm?: number; heightMm?: number }
+  | { kind: "region"; polarity: Polarity; loops: Vec2[][] };
+
 export interface GerberPrimitiveTrack {
   start: Vec2;
   end: Vec2;
   width: number; // in mm
+  polarity: Polarity;
 }
 
 export interface GerberPrimitiveArc {
@@ -25,13 +33,17 @@ export interface GerberPrimitiveArc {
 export interface GerberPrimitiveFlash {
   position: Vec2;
   diameterMm: number; // actual aperture diameter in mm
+  shape: string;         // "C" | "R" | "O" | ...
+  widthMm?: number;      // for R / O
+  heightMm?: number;     // for R / O
+  polarity: Polarity;
 }
 
 const DEFAULT_FLASH_DIAM_MM = 0.8; // fallback if aperture has no size
 
 export interface GerberPrimitiveRegion {
-  boundary: Vec2[];
-  holes: Vec2[][];
+  loops: Vec2[][];       // multiple loops (boundary + holes)
+  polarity: Polarity;
 }
 
 export interface GerberPrimitives {
@@ -39,6 +51,7 @@ export interface GerberPrimitives {
   arcs: GerberPrimitiveArc[];
   flashes: GerberPrimitiveFlash[];
   regions: GerberPrimitiveRegion[];
+  ops: Op[]; // ordered operations for mask rendering
 }
 
 /**
@@ -82,6 +95,12 @@ interface ParserState {
   regionPaths: Vec2[][]; // all contours in current region
   currentPath: Vec2[];   // the contour currently being built
 
+  // Polarity tracking
+  currentPolarity: Polarity;
+
+  // Ordered operations for mask rendering
+  ops: Op[];
+
   tracks: GerberPrimitiveTrack[];
   arcs: GerberPrimitiveArc[];
   flashes: GerberPrimitiveFlash[];
@@ -115,6 +134,8 @@ export function parseGerberFile(
     inRegion: false,
     regionPaths: [],
     currentPath: [],
+    currentPolarity: "dark" as Polarity,
+    ops: [],
     tracks: [],
     arcs: [],
     flashes: [],
@@ -150,9 +171,17 @@ export function parseGerberFile(
       state.regionPaths.push(state.currentPath);
     }
     if (state.regionPaths.length > 0) {
-      state.regions.push({
-        boundary: state.regionPaths[0],
-        holes: state.regionPaths.slice(1),
+      const region: GerberPrimitiveRegion = {
+        loops: state.regionPaths,
+        polarity: state.currentPolarity,
+      };
+      state.regions.push(region);
+
+      // Record ordered operation
+      state.ops.push({
+        kind: "region",
+        polarity: state.currentPolarity,
+        loops: state.regionPaths,
       });
     }
     state.inRegion = false;
@@ -165,6 +194,7 @@ export function parseGerberFile(
     arcs: state.arcs,
     flashes: state.flashes,
     regions: state.regions,
+    ops: state.ops,
   };
 }
 
@@ -271,6 +301,16 @@ function handleParameterBlock(block: string, state: ParserState) {
     return;
   }
 
+  // LPD/LPC polarity commands
+  if (body.startsWith("LPD")) {
+    state.currentPolarity = "dark" as Polarity;
+    return;
+  }
+  if (body.startsWith("LPC")) {
+    state.currentPolarity = "clear" as Polarity;
+    return;
+  }
+
   // ignore other parameter blocks
 }
 
@@ -299,9 +339,17 @@ function handleCommandLine(line: string, state: ParserState) {
 
     if (state.regionPaths.length > 0) {
       // First contour is boundary, rest are holes
-      state.regions.push({
-        boundary: state.regionPaths[0],
-        holes: state.regionPaths.slice(1),
+      const region: GerberPrimitiveRegion = {
+        loops: state.regionPaths,
+        polarity: state.currentPolarity,
+      };
+      state.regions.push(region);
+
+      // Record ordered operation
+      state.ops.push({
+        kind: "region",
+        polarity: state.currentPolarity,
+        loops: state.regionPaths,
       });
     }
 
@@ -396,6 +444,16 @@ function handleCommandLine(line: string, state: ParserState) {
       start: { x: prevX, y: prevY },
       end: { x: newX, y: newY },
       width,
+      polarity: state.currentPolarity,
+    });
+
+    // Record ordered operation
+    state.ops.push({
+      kind: "track",
+      polarity: state.currentPolarity,
+      start: { x: prevX, y: prevY },
+      end: { x: newX, y: newY },
+      widthMm: width,
     });
 
     state.x = newX;
@@ -423,12 +481,24 @@ function handleCommandLine(line: string, state: ParserState) {
         position: { x: newX, y: newY },
         diameterMm: d,
         shape: ap.shape,
+        polarity: state.currentPolarity,
       };
 
       if (ap.widthMm !== undefined) flash.widthMm = ap.widthMm;
       if (ap.heightMm !== undefined) flash.heightMm = ap.heightMm;
 
       state.flashes.push(flash);
+
+      // Record ordered operation
+      state.ops.push({
+        kind: "flash",
+        polarity: state.currentPolarity,
+        position: { x: newX, y: newY },
+        diameterMm: d,
+        shape: ap.shape,
+        widthMm: ap.widthMm,
+        heightMm: ap.heightMm,
+      });
     }
     state.x = newX;
     state.y = newY;
