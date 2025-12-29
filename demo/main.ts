@@ -1,13 +1,59 @@
-import { createBoardViewer, renderGerbersZip } from "../src";
+// demo/main.ts
+import {
+  createBoardViewer,
+  renderGerbers,
+  detectGerberBundle,
+  GerberError,
+} from "../src";
 
 let viewer: ReturnType<typeof createBoardViewer> | null = null;
 let lastRevoke: (() => void) | null = null;
-let lastOut: any = null;
-let lastZipFile: File | null = null;
+let lastFile: File | null = null;
+let lastArchiveType: "zip" | "rar" | null = null;
 
 const inputEl = document.getElementById("file-input") as HTMLInputElement | null;
 const statusEl = document.getElementById("status") as HTMLSpanElement | null;
 const host = document.getElementById("pcb-host") as HTMLDivElement | null;
+
+function setStatus(msg: string) {
+  if (statusEl) statusEl.textContent = msg;
+}
+
+function cleanupLastRender() {
+  if (lastRevoke) {
+    try {
+      lastRevoke();
+    } catch (e) {
+      console.warn("revoke() failed", e);
+    }
+  }
+  lastRevoke = null;
+}
+
+function ensureViewer() {
+  if (viewer) return viewer;
+
+  viewer = createBoardViewer(host!, {
+    onDownload: () => {
+      if (!lastFile) return;
+
+      const a = document.createElement("a");
+      const url = URL.createObjectURL(lastFile);
+
+      a.href = url;
+      a.download =
+        lastFile.name ||
+        (lastArchiveType === "rar" ? "gerbers.rar" : "gerbers.zip");
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      URL.revokeObjectURL(url);
+    },
+  });
+
+  return viewer;
+}
 
 if (!inputEl || !statusEl || !host) {
   throw new Error(
@@ -19,45 +65,68 @@ inputEl.addEventListener("change", async (e) => {
   const file = (e.target as HTMLInputElement).files?.[0];
   if (!file) return;
 
-  lastZipFile = file;
+  lastFile = file;
+  lastArchiveType = null;
 
-  // cleanup
-  if (lastRevoke) lastRevoke();
-  lastRevoke = null;
+  // cleanup previous blobs
+  cleanupLastRender();
 
-  if (!viewer) {
-    viewer = createBoardViewer(host, {
-      onDownload: () => {
-        if (!lastZipFile) return;
-
-        const a = document.createElement("a");
-        const url = URL.createObjectURL(lastZipFile);
-
-        a.href = url;
-        a.download = lastZipFile.name || "gerbers.zip";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-
-        URL.revokeObjectURL(url);
-      },
-    });
-  }
-
-  statusEl.textContent = "Loading gerbers.zip...";
+  const v = ensureViewer();
+  setStatus("Reading file...");
 
   try {
-    const out = await renderGerbersZip(file);
-    lastOut = out;
+    // Optional: run detection first for better UX and early exit.
+    const ab = await file.arrayBuffer();
+    const det = await detectGerberBundle(ab);
+
+    if (!det.isGerber) {
+      setStatus(`Not a Gerber bundle (confidence ${(det.confidence * 100).toFixed(0)}%).`);
+      console.warn("detectGerberBundle:", det);
+      return;
+    }
+
+    if (det.archiveType !== "zip" && det.archiveType !== "rar") {
+      setStatus(`Detected ${det.archiveType}, but demo currently supports zip and rar.`);
+      console.warn("detectGerberBundle:", det);
+      return;
+    }
+
+    lastArchiveType = det.archiveType;
+
+    setStatus(`Rendering ${det.archiveType} layers...`);
+
+    // Use the unified renderGerbers function which supports both ZIP and RAR
+    const out = await renderGerbers(
+      ab,
+      det.archiveType === "rar"
+        ? { archiveWorkerUrl: "/libarchive-worker-bundle.js" }
+        : undefined
+    );
     lastRevoke = out.revoke;
 
-    viewer.setData({ boardGeom: out.boardGeom, layers: out.layers });
-    viewer.setSideMode("top");
-    viewer.fit();
+    v.setData({ boardGeom: out.boardGeom, layers: out.layers });
+    v.setSideMode("top");
+    v.fit();
 
-    statusEl.textContent = `Loaded (stub): ${(out.boardGeom.board.width_in * 25.4).toFixed(1)} x ${(out.boardGeom.board.height_in * 25.4).toFixed(1)} mm`;
+    const wmm = out.boardGeom.board.width_in * 25.4;
+    const hmm = out.boardGeom.board.height_in * 25.4;
+    setStatus(`Loaded ${det.archiveType}: ${wmm.toFixed(1)} x ${hmm.toFixed(1)} mm`);
   } catch (err) {
     console.error(err);
-    statusEl.textContent = "Error loading gerbers.zip (see console)";
+
+    // Nice user-facing message if it's our typed error
+    if (err instanceof GerberError) {
+      setStatus(`${err.code}: ${err.message}`);
+      return;
+    }
+
+    // Some environments may not preserve instanceof across bundles
+    const maybe = err as any;
+    if (maybe && typeof maybe === "object" && "code" in maybe && "message" in maybe) {
+      setStatus(`${String(maybe.code)}: ${String(maybe.message)}`);
+      return;
+    }
+
+    setStatus("Error loading gerber file (see console)");
   }
 });

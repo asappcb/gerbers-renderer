@@ -145,16 +145,23 @@ function buildBoardMaskSvg(stageWpx: number, stageHpx: number) {
 </svg>`.trim();
 }
 
-// Polarity-aware helpers (use your existing versions if they already exist)
-function bboxOfRegion(region: { loops: { x: number; y: number }[][] }) {
+// Helper function to calculate bounding box of a region
+function bboxOfRegion(region: { loops: { x: number; y: number }[][] }): { minX: number; minY: number; maxX: number; maxY: number } {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const loop of region.loops) for (const p of loop) {
-    minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
-    maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+  
+  for (const loop of region.loops) {
+    for (const point of loop) {
+      minX = Math.min(minX, point.x);
+      minY = Math.min(minY, point.y);
+      maxX = Math.max(maxX, point.x);
+      maxY = Math.max(maxY, point.y);
+    }
   }
+  
   return { minX, minY, maxX, maxY };
 }
 
+// Detect negative plane layers - polarity-aware and conservative
 function isNegativePlaneLayer(prims: ReturnType<typeof parseGerberFile>, bounds: BoundsMm): boolean {
   const boardArea = (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
 
@@ -164,6 +171,7 @@ function isNegativePlaneLayer(prims: ReturnType<typeof parseGerberFile>, bounds:
   for (const r of prims.regions) {
     const bb = bboxOfRegion(r);
     const area = (bb.maxX - bb.minX) * (bb.maxY - bb.minY);
+
     if (r.polarity === "clear") largestClearRegionArea = Math.max(largestClearRegionArea, area);
     else largestDarkRegionArea = Math.max(largestDarkRegionArea, area);
   }
@@ -182,10 +190,14 @@ function isNegativePlaneLayer(prims: ReturnType<typeof parseGerberFile>, bounds:
   const clearDominates = clearCount > darkCount * 3;
   const hugeClearRegion = largestClearRegionArea > boardArea * 0.7;
 
+  // If a big DARK plane exists, do NOT invert baseline.
   if (darkPlane) return false;
+
+  // Only invert if CLEAR operations dominate OR there is a huge CLEAR region.
   return clearDominates || hugeClearRegion;
 }
 
+// Drop-in TS helper: buildLayerSvgWithPolarityMask(...)
 function buildLayerSvgWithPolarityMask(
   prims: ReturnType<typeof parseGerberFile>,
   bounds: BoundsMm,
@@ -198,90 +210,121 @@ function buildLayerSvgWithPolarityMask(
   const hPx = Math.max(1, Math.round(mmToPx(hMm)));
   const pxPerMm = mmToPx(1);
 
+  // Detect if this is a negative plane layer
   const negative = isNegativePlaneLayer(prims, bounds);
   const baselineFill = negative ? "white" : "black";
 
   const toPx = (x: number, y: number) => {
     const lx = x - bounds.minX;
-    const ly = bounds.maxY - y;
+    const ly = bounds.maxY - y; // global Y flip (Gerber up -> SVG down)
     return { x: lx * pxPerMm, y: ly * pxPerMm };
   };
 
-  const darkTracks: string[] = [];
-  const clearTracks: string[] = [];
-  const darkFills: string[] = [];
-  const clearFills: string[] = [];
-
-  for (const t of prims.tracks) {
-    const a = toPx(t.start.x, t.start.y);
-    const b = toPx(t.end.x, t.end.y);
-
-    const wMm = Number.isFinite(t.width) ? t.width : 0.2;
-    const sw = Math.max(1, wMm * pxPerMm);
-
-    const el = `<line x1="${a.x.toFixed(2)}" y1="${a.y.toFixed(2)}" x2="${b.x.toFixed(2)}" y2="${b.y.toFixed(2)}" stroke-width="${sw.toFixed(2)}" stroke-linecap="round" stroke-linejoin="round" />`;
-    (t.polarity === "clear" ? clearTracks : darkTracks).push(el);
-  }
-
-  for (const f of prims.flashes) {
-    const p = toPx(f.position.x, f.position.y);
-
-    const fwMm = (f.widthMm ?? f.diameterMm ?? 0.8);
-    const fhMm = (f.heightMm ?? f.diameterMm ?? 0.8);
-
-    const w = Math.max(0.01, Number.isFinite(fwMm) ? fwMm : 0.8) * pxPerMm;
-    const h = Math.max(0.01, Number.isFinite(fhMm) ? fhMm : 0.8) * pxPerMm;
-
-    let el = "";
-    if (f.shape === "R" || f.shape === "O") {
-      const x = p.x - w / 2;
-      const y = p.y - h / 2;
-      const rx = f.shape === "O" ? Math.min(w, h) * 0.35 : 0;
-      el = `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" rx="${rx.toFixed(2)}" />`;
-    } else {
-      const r = Math.max(1, Math.max(w, h) / 2);
-      el = `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r.toFixed(2)}" />`;
+  // Helper to render individual operations
+  const renderOp = (op: any, paintColor: string): string => {
+    if (op.kind === "track") {
+      const a = toPx(op.start.x, op.start.y);
+      const b = toPx(op.end.x, op.end.y);
+      const wMm = Number.isFinite(op.widthMm) ? op.widthMm : 0.2;
+      const sw = Math.max(1, wMm * pxPerMm);
+      return `<line x1="${a.x.toFixed(2)}" y1="${a.y.toFixed(2)}" x2="${b.x.toFixed(2)}" y2="${b.y.toFixed(2)}" stroke-width="${sw.toFixed(2)}" stroke-linecap="round" stroke-linejoin="round" fill="${paintColor}" stroke="${paintColor}" fill-opacity="1" stroke-opacity="1" />`;
     }
+    
+    if (op.kind === "flash") {
+      const p = toPx(op.position.x, op.position.y);
+      const fwMm = (op.widthMm ?? op.diameterMm ?? 0.8);
+      const fhMm = (op.heightMm ?? op.diameterMm ?? 0.8);
+      const w = Math.max(0.01, Number.isFinite(fwMm) ? fwMm : 0.8) * pxPerMm;
+      const h = Math.max(0.01, Number.isFinite(fhMm) ? fhMm : 0.8) * pxPerMm;
+      
+      if (op.shape === "R" || op.shape === "O") {
+        const x = p.x - w / 2;
+        const y = p.y - h / 2;
+        const rx = op.shape === "O" ? Math.min(w, h) * 0.35 : 0;
+        return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" rx="${rx.toFixed(2)}" fill="${paintColor}" fill-opacity="1" />`;
+      } else {
+        const r = Math.max(1, Math.max(w, h) / 2);
+        return `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r.toFixed(2)}" fill="${paintColor}" fill-opacity="1" />`;
+      }
+    }
+    
+    if (op.kind === "region") {
+      const d = op.loops
+        .map((loop: any) => {
+          if (!loop.length) return "";
+          const p0 = toPx(loop[0].x, loop[0].y);
+          const parts = [`M ${p0.x.toFixed(2)} ${p0.y.toFixed(2)}`];
+          for (let i = 1; i < loop.length; i++) {
+            const pi = toPx(loop[i].x, loop[i].y);
+            parts.push(`L ${pi.x.toFixed(2)} ${pi.y.toFixed(2)}`);
+          }
+          parts.push("Z");
+          return parts.join(" ");
+        })
+        .join(" ");
+      
+      if (!d.trim()) return "";
+      return `<path d="${d}" fill-rule="evenodd" fill="${paintColor}" fill-opacity="1" />`;
+    }
+    
+    return "";
+  };
 
-    (f.polarity === "clear" ? clearFills : darkFills).push(el);
+  // Render in exact sequence primitives appear
+  const paint: string[] = [];
+  paint.push(`<rect x="0" y="0" width="${wPx}" height="${hPx}" fill="${baselineFill}" fill-opacity="1" />`);
+
+  for (const op of prims.ops) {
+    const paintColor = op.polarity === "clear" ? "black" : "white";
+    const rendered = renderOp(op, paintColor);
+    if (rendered) paint.push(rendered);
   }
 
+  // Debug logging for polarity counts
+  console.log("[polarity counts]", {
+    tracksClear: prims.tracks.filter(t => t.polarity === "clear").length,
+    regionsClear: prims.regions.filter(r => r.polarity === "clear").length,
+    negativePlane: negative,
+  });
+
+  // Enhanced debug logging for plane detection
+  const boardArea = (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
+  let largestDarkRegionArea = 0;
+  let largestClearRegionArea = 0;
   for (const r of prims.regions) {
-    const d = r.loops
-      .map((loop) => {
-        if (!loop.length) return "";
-        const p0 = toPx(loop[0].x, loop[0].y);
-        const parts = [`M ${p0.x.toFixed(2)} ${p0.y.toFixed(2)}`];
-        for (let i = 1; i < loop.length; i++) {
-          const pi = toPx(loop[i].x, loop[i].y);
-          parts.push(`L ${pi.x.toFixed(2)} ${pi.y.toFixed(2)}`);
-        }
-        parts.push("Z");
-        return parts.join(" ");
-      })
-      .join(" ");
-
-    if (!d.trim()) continue;
-
-    const el = `<path d="${d}" fill-rule="evenodd" />`;
-    (r.polarity === "clear" ? clearFills : darkFills).push(el);
+    const bb = bboxOfRegion(r);
+    const area = (bb.maxX - bb.minX) * (bb.maxY - bb.minY);
+    if (r.polarity === "clear") largestClearRegionArea = Math.max(largestClearRegionArea, area);
+    else largestDarkRegionArea = Math.max(largestDarkRegionArea, area);
   }
+  const darkCount = prims.tracks.filter((t) => t.polarity !== "clear").length +
+                    prims.flashes.filter((f) => f.polarity !== "clear").length +
+                    prims.regions.filter((r) => r.polarity !== "clear").length;
+  const clearCount = prims.tracks.filter((t) => t.polarity === "clear").length +
+                    prims.flashes.filter((f) => f.polarity === "clear").length +
+                    prims.regions.filter((r) => r.polarity === "clear").length;
+  
+  console.log("[plane detect]", {
+    darkCount,
+    clearCount,
+    largestDarkRegionArea,
+    largestClearRegionArea,
+    boardArea,
+    negative,
+  });
 
+  // Mask composition:
+  // - start black (transparent)
+  // - dark = white (visible)
+  // - clear = black (erase)
   const maskId = `ink_${Math.random().toString(16).slice(2)}`;
 
   return `
 <svg xmlns="http://www.w3.org/2000/svg" width="${wPx}" height="${hPx}" viewBox="0 0 ${wPx} ${hPx}">
   <defs>
-    <mask id="${maskId}" maskUnits="userSpaceOnUse">
+    <mask id="${maskId}" maskUnits="userSpaceOnUse" style="mask-type: luminance">
       <rect x="0" y="0" width="${wPx}" height="${hPx}" fill="${baselineFill}" fill-opacity="1" />
-      <g fill="white" stroke="white" fill-opacity="1" stroke-opacity="1">
-        ${darkFills.join("\n        ")}
-        ${darkTracks.join("\n        ")}
-      </g>
-      <g fill="black" stroke="black" fill-opacity="1" stroke-opacity="1">
-        ${clearFills.join("\n        ")}
-        ${clearTracks.join("\n        ")}
-      </g>
+      ${paint.join("\n      ")}
     </mask>
   </defs>
 

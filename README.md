@@ -1,178 +1,254 @@
 # gerbers-renderer
 
-Frontend-only Gerber viewer for the web.
-Render PCB Gerbers directly in the browser. No backend. No CAM tools. No DFM.
+Pure frontend Gerber rendering for the web.
+Render PCB Gerber bundles (`.zip`, `.rar`) directly in the browser with zero backend, zero native dependencies.
 
-👉 Upload a gerbers.zip  
-👉 View Top / Bottom copper, mask, silkscreen, drills  
-👉 Pan, zoom, fit, grid  
-👉 Download the original Gerbers ZIP
+Designed for:
 
-## ✨ Features
+- Web apps
+- Browser extensions
+- CI previews
+- Manufacturing portals
+- DFM tools
 
-- Fully client-side (runs in the browser)
-- Accepts standard gerbers.zip exports
-- Automatic layer classification
-- Correct board masking and clipping
-- Top / Bottom view toggle
-- Grid overlay (mm / inch)
-- Designed to embed into any website
-- No framework dependency (not React/Vue/etc.)
+## Features
 
-## 🚀 Installation
+- 🧠 Gerber bundle detection (not just “try and fail”)
+- 📦 Supports `.zip` and `.rar` archives (browser-side)
+- 🎨 2D SVG-based board viewer
+- 🧩 Drop-in viewer that mounts into any DOM node
+- 🧪 Typed, deterministic render results
+- 🧼 No backend, no workers unless needed
+- ⚡ Vite, React, vanilla JS friendly
 
-### Install from npm (recommended)
+## Installation
+
 ```bash
 npm install gerbers-renderer
 ```
 
-### 🌐 CDN Usage (No Build Tools)
-```html
-<script src="https://unpkg.com/gerbers-renderer"></script>
-<script>
-  const { createBoardViewer, renderGerbersZip } = window.GerbersRenderer;
-</script>
-```
+## Quick start (minimal)
 
-Pin a version if needed:
-
-```html
-<script src="https://unpkg.com/gerbers-renderer@0.1.0"></script>
-```
-
-## 🧩 Minimal Usage Example
-
-**HTML**
-```html
-<input type="file" id="file" accept=".zip" />
-<div id="viewer" style="width:100%; height:600px;"></div>
-```
-
-**JavaScript / TypeScript**
 ```typescript
-import { renderGerbersZip, createBoardViewer } from "gerbers-renderer";
+import { renderGerbers, createBoardViewer } from "gerbers-renderer";
 
-const input = document.getElementById("file") as HTMLInputElement;
-const host = document.getElementById("viewer")!;
+const viewer = createBoardViewer(document.getElementById("pcb")!);
 
-const viewer = createBoardViewer(host, {
-  onDownload: () => {
-    if (!lastZip) return;
-    const a = document.createElement("a");
-    const url = URL.createObjectURL(lastZip);
-    a.href = url;
-    a.download = lastZip.name;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+const file = input.files[0];
+const buffer = await file.arrayBuffer();
+
+const result = await renderGerbers(buffer, {
+  archiveWorkerUrl: "/libarchive-worker-bundle.js", // required for .rar
 });
 
-let lastRender: any = null;
-let lastZip: File | null = null;
-
-input.addEventListener("change", async () => {
-  const file = input.files?.[0];
-  if (!file) return;
-
-  lastZip = file;
-  if (lastRender) lastRender.revoke();
-
-  const out = await renderGerbersZip(file);
-  lastRender = out;
-
-  viewer.setData({
-    boardGeom: out.boardGeom,
-    layers: out.layers
-  });
+viewer.setData({
+  boardGeom: result.boardGeom,
+  layers: result.layers,
 });
+viewer.fit();
 ```
 
-That's it. No server. No workers. No build assumptions.
+Always call `result.revoke()` when replacing a render.
 
-## 🧠 Core API
+## Live demo
 
-### `renderGerbersZip(file: File)`
+```bash
+git clone https://github.com/asappcb/gerbers-renderer
+npm install
+npm run dev
+```
 
-Parses and renders a Gerbers ZIP entirely in the browser.
+Open:
+👉 http://localhost:5173/demo/
 
-**Returns:**
+## Supported input formats
+
+| Format | Supported | Notes |
+|---|---:|---|
+| `.zip` | ✅ | Native via JSZip |
+| `.rar` | ✅ | Via libarchive.js (WASM) |
+| `.7z` | ❌ (future) | Detection works |
+| `.tar` | ❌ (future) | Detection works |
+| Directory | ✅ | Use `renderGerbersFiles` |
+
+## Gerber bundle detection
+
+Before rendering, you can detect whether an input is actually a Gerber bundle.
+
 ```typescript
-{
-  boardGeom: {
-    widthMm: number;
-    heightMm: number;
-  },
-  layers: {
-    top_copper?: string;
-    bottom_copper?: string;
-    top_silk?: string;
-    bottom_silk?: string;
-    top_mask?: string;
-    bottom_mask?: string;
-    drills?: string;
-    top_board_mask?: string;
-    bottom_board_mask?: string;
-  },
-  revoke: () => void
+import { detectGerberBundle } from "gerbers-renderer";
+
+const result = await detectGerberBundle(buffer);
+
+if (!result.isGerber) {
+  console.log("Not a Gerber bundle:", result.reasons);
 }
 ```
 
-Layer values are blob URLs containing SVGs.
+```typescript
+type GerberDetectResult = {
+  isGerber: boolean;
+  archiveType: "zip" | "rar" | "7z" | "tar" | "directory" | "single-file" | "unknown";
+  confidence: number; // 0.0 – 1.0
+  reasons: string[];
+  files?: string[];
+};
+```
 
-Call `revoke()` when replacing or discarding a render.
+## Rendering APIs
 
-### `createBoardViewer(host, options?)`
+### `renderGerbers(...)` (recommended)
 
-Mounts an interactive PCB viewer into a DOM element.
+Single high-level entrypoint.
 
 ```typescript
-createBoardViewer(host, {
-  onDownload?: () => void
+renderGerbers(
+  input: ArrayBuffer | Uint8Array,
+  options?: {
+    archiveWorkerUrl?: string; // required for rar
+  }
+): Promise<RenderResult>
+```
+
+Handles:
+
+- Archive detection
+- Unpacking
+- Validation
+- Rendering
+
+### `renderGerbersZip(...)`
+
+Zip-only convenience wrapper.
+
+```typescript
+renderGerbersZip(input: File | Blob | ArrayBuffer | Uint8Array)
+```
+
+### `renderGerbersFiles(...)`
+
+Lowest-level API if you already have files.
+
+```typescript
+renderGerbersFiles(
+  files: Record<string, Uint8Array>
+)
+```
+
+## Viewer
+
+Create a drop-in board viewer:
+
+```typescript
+const viewer = createBoardViewer(container, {
+  onDownload: () => {
+    /* optional */
+  },
+});
+
+viewer.setData({
+  boardGeom,
+  layers,
+});
+
+viewer.setSideMode("top"); // "top" | "bottom"
+viewer.fit();
+```
+
+The viewer supports:
+
+- Pan / zoom
+- Layer toggling
+- Top / bottom switching
+- Download hook (original Gerbers)
+
+## Return value
+
+All render functions return a deterministic object:
+
+```typescript
+type RenderResult = {
+  boardGeom: BoardGeom;
+  layers: ViewerLayers;
+  revoke: () => void; // revoke blob URLs
+};
+```
+
+Always call `revoke()` when replacing a render.
+
+## `.rar` support (important)
+
+To support `.rar` archives, you must host the libarchive worker bundle.
+
+Setup
+
+Copy:
+
+```text
+node_modules/libarchive.js/dist/worker-bundle.js
+```
+
+To:
+
+```text
+public/libarchive-worker-bundle.js
+```
+
+Then pass:
+
+```typescript
+renderGerbers(buffer, {
+  archiveWorkerUrl: "/libarchive-worker-bundle.js",
 });
 ```
 
-The viewer handles:
-- pan / zoom / fit
-- Top / Bottom switching
-- layer visibility
-- board clipping mask
+ZIP users do not pay this cost.
 
-The viewer is intentionally stateless with respect to parsing.
+## Error handling
 
-## 📦 Download Behavior
+Errors are typed and structured.
 
-The viewer does not decide what "Download" means.
+```typescript
+class GerberError extends Error {
+  code:
+    | "NOT_AN_ARCHIVE"
+    | "UNSUPPORTED_ARCHIVE"
+    | "NOT_GERBER"
+    | "MISSING_LAYERS"
+    | "PARSE_ERROR";
+  details?: any;
+}
+```
 
-Instead, you supply a handler via `onDownload`.
+Always catch and inspect `error.code` in UI or CI.
 
-Typical use:
-- download the original gerbers.zip
-- export SVG layers
-- export screenshots
-- pipe into manufacturing workflows
+## What this is not
 
-This keeps the viewer reusable across products.
+- ❌ Not a CAM tool
+- ❌ Not a DRC / DFM engine
+- ❌ Not a backend renderer
 
-## 🧭 Design Philosophy
+This library is intentionally focused on fast, accurate visualization.
 
-- Viewer ≠ parser ≠ renderer
-- Frontend-only by design
-- No assumptions about backend or manufacturing
-- Safe to embed anywhere
-- Easy to extend
+## Roadmap
 
-This project is intentionally not a CAM tool or DFM checker.
+- 7z / tar unpacking
+- Inner-layer rendering
+- Canvas renderer
+- WASM-only core split
+- Headless CI validation mode
 
-## ❌ What This Is Not
-
-- Not a DFM rules engine
-- Not a fabrication quote system
-- Not a replacement for CAM software
-
-It's a fast, embeddable Gerber viewer.
-
-## 📄 License
+## License
 
 MIT
 
-Use it freely in commercial or open-source projects.
+## Why this exists
+
+Most Gerber viewers:
+
+- require servers
+- are untyped
+- break in browsers
+- silently mis-detect archives
+
+gerbers-renderer is designed from first principles for modern web tooling.
