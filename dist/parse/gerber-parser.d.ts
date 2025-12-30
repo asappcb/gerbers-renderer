@@ -4,10 +4,31 @@ import { LayerRole } from '../io/file-classifier';
  * Primitive types used by the geometry pipeline. These are what
  * polygonizer.ts consumes.
  */
+export type Polarity = "dark" | "clear";
+export type Op = {
+    kind: "track";
+    polarity: Polarity;
+    start: Vec2;
+    end: Vec2;
+    widthMm: number;
+} | {
+    kind: "flash";
+    polarity: Polarity;
+    position: Vec2;
+    diameterMm: number;
+    shape: string;
+    widthMm?: number;
+    heightMm?: number;
+} | {
+    kind: "region";
+    polarity: Polarity;
+    loops: Vec2[][];
+};
 export interface GerberPrimitiveTrack {
     start: Vec2;
     end: Vec2;
     width: number;
+    polarity: Polarity;
 }
 export interface GerberPrimitiveArc {
     start: Vec2;
@@ -19,16 +40,21 @@ export interface GerberPrimitiveArc {
 export interface GerberPrimitiveFlash {
     position: Vec2;
     diameterMm: number;
+    shape: string;
+    widthMm?: number;
+    heightMm?: number;
+    polarity: Polarity;
 }
 export interface GerberPrimitiveRegion {
-    boundary: Vec2[];
-    holes: Vec2[][];
+    loops: Vec2[][];
+    polarity: Polarity;
 }
 export interface GerberPrimitives {
     tracks: GerberPrimitiveTrack[];
     arcs: GerberPrimitiveArc[];
     flashes: GerberPrimitiveFlash[];
     regions: GerberPrimitiveRegion[];
+    ops: Op[];
 }
 export interface GerberPrimitiveFlash {
     position: Vec2;
