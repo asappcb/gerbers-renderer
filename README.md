@@ -20,6 +20,8 @@ Designed for:
 - 🧪 Typed, deterministic render results
 - 🧼 No backend, no workers unless needed
 - ⚡ Vite, React, vanilla JS friendly
+- 🎯 Precise viewport transforms with camera controls
+- 📐 Coordinate system: Board (mm) ↔ Screen (px) conversion
 
 ## Installation
 
@@ -237,6 +239,48 @@ This library is intentionally focused on fast, accurate visualization.
 - Canvas renderer
 - WASM-only core split
 - Headless CI validation mode
+
+## Architecture
+
+### Viewport Transform System
+
+The renderer uses a precise coordinate transformation system:
+
+```typescript
+import { ViewportTransform, CameraState } from "gerbers-renderer";
+
+const transform = new ViewportTransform(
+  {
+    center_mm: { x: 0, y: 0 },  // Camera center in board coordinates
+    zoom: 10,                    // Pixels per mm
+    rotation_rad: 0,             // Camera rotation
+    mirrorX: false,              // Horizontal flip (for layers)
+    mirrorY: false,              // Vertical flip (for layers)
+  },
+  { width_px: 800, height_px: 600 }
+);
+
+// Convert between coordinate systems
+const screenPos = transform.boardToScreen({ x: 10, y: 5 });  // mm → px
+const boardPos = transform.screenToBoard({ x: 400, y: 300 }); // px → mm
+```
+
+**Coordinate Conventions:**
+- **Board space**: x right, y up (millimeters)
+- **Screen space**: x right, y down (pixels, canvas default)
+- **Screen origin**: top left
+- **Zoom**: pixels per mm (larger = more zoomed in)
+
+**Matrix Composition:**
+```
+M = T(screenCenter) * S(zoom*flipX, zoom*flipY) * R(rotation) * T(-center)
+```
+
+This enables:
+- Precise pan/zoom/rotation controls
+- Accurate mouse picking and hit testing
+- Consistent layer mirroring (top/bottom)
+- Canvas integration with `ctx.setTransform()`
 
 ## License
 

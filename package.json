@@ -23,7 +23,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest"
   },
   "repository": {
     "type": "git",
@@ -54,9 +55,11 @@
     "@types/jszip": "^3.4.0",
     "@types/node": "^24.10.1",
     "@types/three": "^0.181.0",
+    "jsdom": "^27.4.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "vite": "^7.2.7",
-    "vite-plugin-dts": "^4.5.4"
+    "vite-plugin-dts": "^4.5.4",
+    "vitest": "^2.1.9"
   }
 }
