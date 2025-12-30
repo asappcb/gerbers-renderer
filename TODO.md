@@ -19,17 +19,32 @@ Files created:
 - src/viewportTransform.test.ts (unit tests)
 - src/viewportTransform.example.ts (canvas integration)
 
-Step 2: Add a render loop contract
+✅ Step 2: Add a render loop contract - COMPLETED
 
-Even if you render on-demand, standardize:
+Implemented deterministic rendering pipeline with:
 
-viewer.render() calls:
+- **Render Contract**: Defined RenderCtx, RenderPass, VisibilityState interfaces
+- **Render Scheduler**: On-demand rendering with requestAnimationFrame coalescing  
+- **Viewer Pipeline**: Single render() entry point with pass registry
+- **Four Stages**: Base gerber passes (0-99), overlays (100-199), markers (200-299), selection (300-399)
+- **Visibility Manager**: Centralized state management with subscription system
+- **Unit Tests**: 18 tests covering render ordering, pass management, and scheduler behavior
 
-base gerber passes
+Key Features:
+- `viewer.render()` as single entry point for all pixel painting
+- Deterministic pipeline order with fine-grained control via `order` field
+- Internal scheduler prevents flickering/double-renders
+- Pass isolation with save/restore context management
+- Clean enabled() checks via centralized VisibilityState
 
-overlays (sorted by zIndex)
-
-markers
+Files created:
+- src/renderContract.ts (interfaces and order ranges)
+- src/renderScheduler.ts (on-demand rendering scheduler)
+- src/viewer.ts (main viewer with pipeline registry)
+- src/renderPasses.ts (four stage passes and systems)
+- src/visibilityManager.ts (centralized visibility state)
+- src/viewer.test.ts (comprehensive unit tests)
+- src/testSetup.ts (test environment mocks)
 
 selection highlights
 

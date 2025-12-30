@@ -1,12 +1,13 @@
 // demo/main.ts
 import {
   createBoardViewer,
+  createIntegratedViewer,
   renderGerbers,
   detectGerberBundle,
   GerberError,
 } from "../src";
 
-let viewer: ReturnType<typeof createBoardViewer> | null = null;
+let viewer: ReturnType<typeof createIntegratedViewer> | null = null;
 let lastRevoke: (() => void) | null = null;
 let lastFile: File | null = null;
 let lastArchiveType: "zip" | "rar" | null = null;
@@ -33,7 +34,7 @@ function cleanupLastRender() {
 function ensureViewer() {
   if (viewer) return viewer;
 
-  viewer = createBoardViewer(host!, {
+  viewer = createIntegratedViewer(host!, {
     onDownload: () => {
       if (!lastFile) return;
 
@@ -72,6 +73,8 @@ inputEl.addEventListener("change", async (e) => {
   cleanupLastRender();
 
   const v = ensureViewer();
+  if (!v) return;
+    
   setStatus("Reading file...");
 
   try {
@@ -110,7 +113,7 @@ inputEl.addEventListener("change", async (e) => {
 
     const wmm = out.boardGeom.board.width_in * 25.4;
     const hmm = out.boardGeom.board.height_in * 25.4;
-    setStatus(`Loaded ${det.archiveType}: ${wmm.toFixed(1)} x ${hmm.toFixed(1)} mm`);
+    setStatus(`Loaded ${det.archiveType}: ${wmm.toFixed(1)} x ${hmm.toFixed(1)} mm (with new render pipeline)`);
   } catch (err) {
     console.error(err);
 

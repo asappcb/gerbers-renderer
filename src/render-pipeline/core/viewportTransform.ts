@@ -152,9 +152,9 @@ export class ViewportTransform {
 
     const screenCenter = { x: width_px / 2, y: height_px / 2 };
 
-    // Screen y axis goes down, board y goes up -> base flipY = -1
-    // mirrorY can flip board y additionally (useful for top/bottom)
-    const flipY = -1 * (mirrorY ? -1 : 1);
+    // Screen y axis goes down, board y also goes down (top-left origin)
+    // mirrorY can flip board y if needed (useful for coordinate system changes)
+    const flipY = (mirrorY ? -1 : 1);
     const flipX = (mirrorX ? -1 : 1);
 
     // Compose: T(screenCenter) * S(zoom*flipX, zoom*flipY) * R(rotation) * T(-center)

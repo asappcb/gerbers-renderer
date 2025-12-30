@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { ViewportTransform } from "./viewportTransform";
+import { describe, it, expect, beforeEach } from "vitest";
+import { ViewportTransform, CameraState, Viewport, Vec2 } from "./viewportTransform";
 
 function approx(a: number, b: number, eps = 1e-6) {
   expect(Math.abs(a - b)).toBeLessThanOrEqual(eps);
@@ -67,7 +67,7 @@ describe("ViewportTransform", () => {
 
     const a = t.boardToScreen({ x: 0, y: 0 });
     const b = t.boardToScreen({ x: 0, y: 1 });
-    expect(b.y - a.y).toBeCloseTo(10, 6); // Positive because double flip (screen y-down + mirror)
+    expect(b.y - a.y).toBeCloseTo(-10, 6); // Negative because mirrorY flips Y
   });
 
   it("handles rotation correctly", () => {
@@ -76,12 +76,13 @@ describe("ViewportTransform", () => {
       { width_px: 400, height_px: 400 }
     );
 
-    // 90 degree rotation should map (1,0) to approximately (0,-1) in screen coords
+    // 90 degree rotation should map (1,0) to approximately (0,1) in screen coords
+    // (since both board and screen Y go down, no flip occurs)
     const p = t.boardToScreen({ x: 1, y: 0 });
     const center = t.boardToScreen({ x: 0, y: 0 });
     
     expect(p.x - center.x).toBeCloseTo(0, 6);
-    expect(p.y - center.y).toBeCloseTo(-1, 6); // Negative due to screen y-down
+    expect(p.y - center.y).toBeCloseTo(1, 6); // Positive because both Y axes go down
   });
 
   it("updates camera correctly", () => {

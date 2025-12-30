@@ -31,8 +31,9 @@ npm install gerbers-renderer
 
 ## Quick start (minimal)
 
+### Legacy Viewer (DOM-based)
 ```typescript
-import { renderGerbers, createBoardViewer } from "gerbers-renderer";
+import { createBoardViewer } from "gerbers-renderer";
 
 const viewer = createBoardViewer(document.getElementById("pcb")!);
 
@@ -50,6 +51,40 @@ viewer.setData({
 viewer.fit();
 ```
 
+### Integrated Viewer (Canvas-based) - Recommended
+```typescript
+import { createIntegratedViewer } from "gerbers-renderer";
+
+const viewer = createIntegratedViewer(document.getElementById("pcb")!);
+
+const file = input.files[0];
+const buffer = await file.arrayBuffer();
+
+const result = await renderGerbers(buffer, {
+  archiveWorkerUrl: "/libarchive-worker-bundle.js", // required for .rar
+});
+
+viewer.setData({
+  boardGeom: result.boardGeom,
+  layers: result.layers,
+});
+viewer.fit();
+
+// New features: markers, selections, custom overlays
+viewer.addMarker({
+  id: "test-point",
+  position: { x: 10, y: 5 }, // mm coordinates
+  type: "testpoint"
+});
+
+viewer.setSelection({
+  type: "region",
+  bounds: { min: { x: 0, y: 0 }, max: { x: 20, y: 10 } }
+});
+```
+
+**Migration**: See [MIGRATION.md](./MIGRATION.md) for detailed upgrade guide.
+
 Always call `result.revoke()` when replacing a render.
 
 ## Live demo
@@ -62,6 +97,14 @@ npm run dev
 
 Open:
 👉 http://localhost:5173/demo/
+
+**The demo now showcases the new integrated viewer** with:
+- Canvas-based rendering with hardware acceleration
+- Grid overlay with mm/in units
+- Precise viewport transforms and smooth pan/zoom
+- Mouse-centered zoom (zooms where cursor is positioned)
+- Green FR4 board background
+- Clean rendering without placeholder text artifacts
 
 ## Supported input formats
 
@@ -250,37 +293,70 @@ The renderer uses a precise coordinate transformation system:
 import { ViewportTransform, CameraState } from "gerbers-renderer";
 
 const transform = new ViewportTransform(
-  {
-    center_mm: { x: 0, y: 0 },  // Camera center in board coordinates
-    zoom: 10,                    // Pixels per mm
-    rotation_rad: 0,             // Camera rotation
-    mirrorX: false,              // Horizontal flip (for layers)
-    mirrorY: false,              // Vertical flip (for layers)
-  },
+  { center_mm: { x: 50, y: 25 }, zoom: 10 },
   { width_px: 800, height_px: 600 }
 );
 
 // Convert between coordinate systems
 const screenPos = transform.boardToScreen({ x: 10, y: 5 });  // mm → px
-const boardPos = transform.screenToBoard({ x: 400, y: 300 }); // px → mm
-```
-
-**Coordinate Conventions:**
-- **Board space**: x right, y up (millimeters)
-- **Screen space**: x right, y down (pixels, canvas default)
-- **Screen origin**: top left
-- **Zoom**: pixels per mm (larger = more zoomed in)
-
-**Matrix Composition:**
-```
-M = T(screenCenter) * S(zoom*flipX, zoom*flipY) * R(rotation) * T(-center)
 ```
 
 This enables:
-- Precise pan/zoom/rotation controls
-- Accurate mouse picking and hit testing
-- Consistent layer mirroring (top/bottom)
-- Canvas integration with `ctx.setTransform()`
+- Precise coordinate transformations
+- Smooth pan/zoom operations
+- Mathematical foundation for extensions
+
+### Render Pipeline
+```typescript
+import { createIntegratedViewer } from "gerbers-renderer";
+
+const viewer = createIntegratedViewer(container);
+viewer.setData({ boardGeom, layers });
+
+// Add custom render passes
+viewer.viewer.addPass({
+  id: "custom-overlay",
+  order: 150,
+  enabled: () => true,
+  draw: (rc) => {
+    // Draw in board coordinates
+    const m = rc.xform.getWorldToScreenMatrix();
+    rc.ctx.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
+    // ... your drawing code
+  }
+});
+```
+
+**Render Stages:**
+- **Base Gerber** (0-99): Copper traces, masks, silk screen
+- **Overlays** (100-199): Grid, rulers, custom drawings  
+- **Markers** (200-299): Test points, components, annotations
+- **Selection** (300-399): Highlighted regions and elements
+
+**Key Features:**
+- Deterministic rendering order
+- Efficient render scheduling with requestAnimationFrame
+- Centralized visibility management
+- Extensible render pass system
+
+**Visibility Control:**
+```typescript
+// Use presets
+viewer.visibility.applyPreset('copper-only');
+
+// Individual control
+viewer.visibility.setGerberVisibility('copper', false);
+viewer.visibility.setOverlayVisibility('grid', true);
+viewer.visibility.setMarkersVisibility(true);
+```
+
+**File Organization:**
+- `src/render-pipeline/core/`: Core components (transforms, contracts, scheduling)
+- `src/render-pipeline/`: Complete render pipeline implementation
+- `src/viewer/`: Legacy DOM-based viewer (unchanged)
+- `src/index.ts`: Unified exports for both systems
+
+See [FILE_STRUCTURE.md](./FILE_STRUCTURE.md) for detailed organization.
 
 ## License
 
