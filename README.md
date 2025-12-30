@@ -20,6 +20,8 @@ Designed for:
 - 🎯 Overlay system for custom visualizations
 - 📍 High-performance marker system with spatial indexing
 - 🎯 Built-in selection and interaction systems
+- ⚡ Typed event emitter for user interactions
+- 👁️ Centralized visibility management system
 - 🧪 Typed, deterministic render results
 - 🧼 No backend, no workers unless needed
 - ⚡ Vite, React, vanilla JS friendly
@@ -531,6 +533,372 @@ const picker = viewer.getMarkerPicker();
 - **Interactive Selection**: Click to select, hover for feedback
 - **Batch Operations**: Efficient bulk updates
 - **Custom Data**: Attach any metadata via `data` property
+
+## Event System
+
+The integrated viewer includes a typed event emitter for responding to user interactions and state changes:
+
+### Event Types
+
+```typescript
+type ViewerEvents = {
+  "hover:marker": { markerId: string | null; marker?: Marker };
+  "select:marker": { markerId: string | null; marker?: Marker };
+  "click:board": { x_mm: number; y_mm: number };
+  "view:change": { center_mm: { x: number; y: number }; zoom: number; rotation_rad: number };
+};
+```
+
+### Setting Up Event Listeners
+
+```typescript
+// Set up mouse event handling (call once after viewer creation)
+viewer.setupEventListeners();
+
+// Listen to marker hover events
+viewer.on('hover:marker', ({ markerId, marker }) => {
+  if (marker) {
+    console.log(`Hovering: ${marker.severity} at ${marker.x_mm}, ${marker.y_mm}`);
+    // Update tooltip or UI
+  } else {
+    // Hide tooltip
+  }
+});
+
+// Listen to marker selection events
+viewer.on('select:marker', ({ markerId, marker }) => {
+  if (marker) {
+    console.log(`Selected: ${marker.data?.description}`);
+    // Show details panel or highlight related elements
+  }
+});
+
+// Listen to board clicks (clicking empty space)
+viewer.on('click:board', ({ x_mm, y_mm }) => {
+  console.log(`Clicked board at ${x_mm.toFixed(2)}, ${y_mm.toFixed(2)}mm`);
+  // Could add a marker at this position or show context menu
+});
+
+// Listen to view changes (pan/zoom)
+viewer.on('view:change', ({ center_mm, zoom, rotation_rad }) => {
+  console.log(`View changed: center=${center_mm.x},${center_mm.y} zoom=${zoom}`);
+  // Update coordinates display or save view state
+});
+```
+
+### Event Listener Options
+
+```typescript
+// One-time listener (auto-unsubscribes after first event)
+viewer.once('select:marker', ({ marker }) => {
+  console.log('First selection:', marker?.id);
+});
+
+// Manual unsubscribe
+const unsub = viewer.on('hover:marker', onHover);
+// Later...
+unsub(); // Remove listener
+```
+
+### Event Characteristics
+
+- **No Spam**: Events only emit when state actually changes
+- **Type Safe**: Full TypeScript typing for all events
+- **Performance**: Efficient Set-based handler storage
+- **Robust**: Safe unsubscribe even during event emission
+
+### Integration with Markers
+
+The event system integrates seamlessly with the marker system:
+
+```typescript
+// Add markers
+viewer.addMarkers([
+  { id: 'error1', x_mm: 10, y_mm: 15, severity: 'error', data: { issue: 'Via too close' } },
+  { id: 'warn1', x_mm: 20, y_mm: 25, severity: 'warning', data: { issue: 'Trace width' } }
+]);
+
+// Events will automatically fire for hover/selection
+viewer.setupEventListeners();
+
+// Build interactive UI
+viewer.on('hover:marker', ({ marker }) => {
+  if (marker?.severity === 'error') {
+    showTooltip(marker.data?.issue);
+  }
+});
+
+viewer.on('select:marker', ({ marker }) => {
+  if (marker) {
+    showDetailsPanel(marker);
+    // Optional: center view on selection
+    viewer.selectMarker(marker.id, { center: true, animate: true });
+  }
+});
+```
+
+### Advanced Usage
+
+```typescript
+// Custom event handling for DFM tools
+class DFMTool {
+  constructor(viewer) {
+    this.viewer = viewer;
+    this.setupEvents();
+  }
+
+  setupEvents() {
+    this.viewer.on('hover:marker', this.onHover.bind(this));
+    this.viewer.on('select:marker', this.onSelect.bind(this));
+    this.viewer.on('click:board', this.onBoardClick.bind(this));
+  }
+
+  onHover({ marker }) {
+    if (marker?.severity === 'error') {
+      this.showCriticalError(marker);
+    }
+  }
+
+  onSelect({ marker }) {
+    if (marker) {
+      this.zoomToIssue(marker);
+      this.showRelatedElements(marker);
+    }
+  }
+
+  onBoardClick({ x_mm, y_mm }) {
+    // Add new marker at click position
+    this.viewer.addMarker({
+      id: `custom-${Date.now()}`,
+      x_mm,
+      y_mm,
+      severity: 'info',
+      data: { source: 'user-click' }
+    });
+  }
+}
+
+// Usage
+const dfmTool = new DFMTool(viewer);
+```
+
+**Key Features:**
+- **Typed Events**: Full TypeScript safety with event payloads
+- **State Change Detection**: No duplicate events spam
+- **Memory Safe**: Automatic cleanup and unsubscribe support
+- **Interactive**: Built-in hover and selection handling
+- **Extensible**: Easy to add custom event handling logic
+
+## Visibility System
+
+The integrated viewer includes a centralized visibility management system that controls which layers and features are rendered:
+
+### Visibility State Structure
+
+```typescript
+type VisibilityState = {
+  gerber: {
+    copper: boolean;      // Copper traces
+    solderMask: boolean;   // Solder mask layers
+    silk: boolean;        // Silk screen layers
+    outline: boolean;     // Board outline
+  };
+  overlays: Record<string, boolean>; // Custom overlay visibility
+  markers: boolean;      // Marker system visibility
+};
+```
+
+### Basic Visibility Control
+
+```typescript
+// Get current visibility state
+const state = viewer.getVisibility();
+console.log(state.gerber.copper); // true/false
+console.log(state.markers);      // true/false
+
+// Set individual layer visibility
+viewer.setGerberVisibility('copper', false);
+viewer.setOverlayVisibility('grid', true);
+viewer.setMarkersVisibility(true);
+
+// Toggle layers
+viewer.toggleGerberLayer('silk');
+viewer.toggleOverlay('grid');
+viewer.toggleMarkers();
+```
+
+### Visibility Presets
+
+```typescript
+// Quick visibility presets for common use cases
+viewer.applyVisibilityPreset('all');        // Show everything
+viewer.applyVisibilityPreset('none');       // Hide everything
+viewer.applyVisibilityPreset('copper-only'); // Only copper + outline
+viewer.applyVisibilityPreset('minimal');   // Copper + outline + markers
+```
+
+### Reactive Updates
+
+The visibility system supports reactive updates through subscriptions:
+
+```typescript
+// Subscribe to visibility changes
+const unsubscribe = viewer.onVisibilityChange((state) => {
+  console.log('Visibility changed:', state);
+  // Update UI controls, save state, etc.
+});
+
+// Later, when done
+unsubscribe();
+```
+
+### Integration with Render Pipeline
+
+All render passes receive the current visibility state and can make rendering decisions based on it:
+
+```typescript
+// Gerber layers check their specific visibility
+enabled: (rc) => rc.visibility.gerber.copper,
+
+// Markers check global marker visibility  
+enabled: (rc) => rc.visibility.markers,
+
+// Overlays filter by their individual visibility
+const visibleOverlays = overlays.filter(overlay => 
+  rc.visibility.overlays[overlay.id] ?? overlay.visible
+);
+```
+
+### Advanced Usage
+
+```typescript
+// Custom visibility management
+class CustomUI {
+  constructor(viewer) {
+    this.viewer = viewer;
+    this.setupControls();
+  }
+
+  setupControls() {
+    // Create custom visibility controls
+    this.createLayerToggles();
+    this.setupPresets();
+    this.setupReactiveUI();
+  }
+
+  createLayerToggles() {
+    const layers = ['copper', 'solderMask', 'silk', 'outline'];
+    
+    layers.forEach(layer => {
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox';
+      toggle.checked = this.viewer.getVisibility().gerber[layer];
+      
+      toggle.addEventListener('change', () => {
+        this.viewer.setGerberVisibility(layer, toggle.checked);
+      });
+      
+      document.body.appendChild(toggle);
+    });
+  }
+
+  setupPresets() {
+    const presetSelect = document.createElement('select');
+    
+    const presets = [
+      { value: 'all', label: 'All Layers' },
+      { value: 'none', label: 'None' },
+      { value: 'copper-only', label: 'Copper Only' },
+      { value: 'minimal', label: 'Minimal' }
+    ];
+    
+    presets.forEach(preset => {
+      const option = document.createElement('option');
+      option.value = preset.value;
+      option.textContent = preset.label;
+      presetSelect.appendChild(option);
+    });
+    
+    presetSelect.addEventListener('change', () => {
+      this.viewer.applyVisibilityPreset(presetSelect.value);
+    });
+    
+    document.body.appendChild(presetSelect);
+  }
+
+  setupReactiveUI() {
+    // Update UI when visibility changes
+    this.viewer.onVisibilityChange((state) => {
+      // Update checkbox states
+      document.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+        const layer = checkbox.dataset.layer;
+        if (layer && state.gerber[layer]) {
+          checkbox.checked = true;
+        }
+      });
+      
+      // Update status display
+      const visibleCount = Object.values(state.gerber).filter(Boolean).length;
+      console.log(`Visible layers: ${visibleCount}/4`);
+    });
+  }
+}
+
+// Usage
+const customUI = new CustomUI(viewer);
+```
+
+### Performance Features
+
+- **Centralized State**: Single source of truth prevents inconsistencies
+- **Efficient Updates**: Only re-renders when visibility actually changes
+- **Subscription System**: Reactive updates without polling
+- **Type Safety**: Full TypeScript support prevents runtime errors
+- **Batch Operations**: Presets and bulk updates minimize renders
+
+### Integration Examples
+
+```typescript
+// DFM tool with custom visibility controls
+class DFMTool {
+  constructor(viewer) {
+    this.viewer = viewer;
+    this.setupDFMPresets();
+  }
+
+  setupDFMPresets() {
+    // Custom DFM-specific presets
+    this.addPreset('dfm-errors', {
+      gerber: { copper: true, solderMask: false, silk: false, outline: true },
+      markers: true,
+      overlays: { 'dfm-highlights': true }
+    });
+
+    this.addPreset('manufacturing', {
+      gerber: { copper: true, solderMask: true, silk: true, outline: true },
+      markers: false,
+      overlays: { 'dimensions': true, 'tolerances': true }
+    });
+  }
+
+  addPreset(name, config) {
+    // Add custom preset button
+    const button = document.createElement('button');
+    button.textContent = name;
+    button.addEventListener('click', () => {
+      this.viewer.setVisibility(config);
+    });
+    document.body.appendChild(button);
+  }
+}
+```
+
+**Key Features:**
+- **Centralized Management**: Single visibility state prevents inconsistencies
+- **Reactive Updates**: Automatic re-renders on state changes
+- **Type Safe**: Full TypeScript support throughout
+- **Performance Optimized**: Efficient subscription-based updates
+- **Extensible**: Easy to add custom controls and presets
 
 ### Render Pipeline
 

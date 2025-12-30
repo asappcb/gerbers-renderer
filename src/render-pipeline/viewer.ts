@@ -4,15 +4,17 @@ import { ViewportTransform, CameraState, Viewport } from './core/viewportTransfo
 import { OverlayRegistry } from './overlayRegistry';
 import { MarkerStore } from './markerStore';
 import { MarkerPicker } from './markerPicker';
+import { Emitter } from './events';
+import type { ViewerEvents } from './viewerEvents';
+import { VisibilityManager } from './visibilityManager';
 
 export class Viewer {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private xform: ViewportTransform;
-  private visibility: VisibilityState;
+  private visibility: VisibilityManager;
   private passes: RenderPass[] = [];
   private scheduler: RenderScheduler;
-  private visibilityGetter: () => VisibilityState = () => this.visibility; // Default getter
   private overlays = new OverlayRegistry();
   private overlayApi: OverlayApi;
   private boardBounds = { minX_mm: 0, minY_mm: 0, maxX_mm: 100, maxY_mm: 100 }; // Default bounds
@@ -22,6 +24,30 @@ export class Viewer {
   private markerPicker = new MarkerPicker(this.markers);
   private selectedMarkerId: string | null = null;
   private hoverMarkerId: string | null = null;
+
+  // Event system
+  private events = new Emitter<ViewerEvents>();
+  on = this.events.on.bind(this.events);
+  once = this.events.once.bind(this.events);
+  off = this.events.off.bind(this.events);
+
+  private emit<K extends keyof ViewerEvents>(evt: K, payload: ViewerEvents[K]) {
+    this.events.emit(evt, payload);
+  }
+
+  private setHoverMarker(nextId: string | null) {
+    if (nextId === this.hoverMarkerId) return; // no spam
+    this.hoverMarkerId = nextId;
+
+    if (nextId) {
+      const marker = this.markers.get(nextId);
+      this.emit("hover:marker", { markerId: nextId, marker });
+    } else {
+      this.emit("hover:marker", { markerId: null });
+    }
+
+    this.requestRender("hover-change");
+  }
 
   constructor(canvas: HTMLCanvasElement, initialCamera: CameraState) {
     this.canvas = canvas;
@@ -36,17 +62,8 @@ export class Viewer {
 
     this.xform = new ViewportTransform(initialCamera, viewport);
     
-    // Initialize visibility state
-    this.visibility = {
-      gerber: {
-        copper: true,
-        solderMask: true,
-        silk: true,
-        outline: true,
-      },
-      overlays: {},
-      markers: true,
-    };
+    // Initialize visibility manager
+    this.visibility = new VisibilityManager();
 
     this.scheduler = new RenderScheduler(() => this.render());
 
@@ -74,11 +91,6 @@ export class Viewer {
 
     // Handle canvas resize
     this.setupResizeHandling();
-  }
-
-  // Method to set the visibility getter
-  setVisibilityGetter(getVisibility: () => VisibilityState) {
-    this.visibilityGetter = getVisibility;
   }
 
   private setupResizeHandling() {
@@ -133,7 +145,7 @@ export class Viewer {
       viewport,
       xform: this.xform,
       now_ms: performance.now(),
-      visibility: this.visibilityGetter(), // Use the getter function
+      visibility: this.visibility.getState(), // Use visibility manager
       boardToScreen: (p) => this.xform.boardToScreen({ x: p.x, y: p.y }),
       screenToBoard: (p) => this.xform.screenToBoard({ x: p.x, y: p.y }),
     };
@@ -148,7 +160,7 @@ export class Viewer {
 
     // Execute all passes in order
     for (const pass of this.passes) {
-      if (!pass.enabled()) {
+      if (!pass.enabled(rc)) {
         continue;
       }
       
@@ -171,25 +183,62 @@ export class Viewer {
     return this.xform.getCamera();
   }
 
-  // Visibility controls
+  // Visibility controls - delegate to VisibilityManager
   setVisibility(visibility: Partial<VisibilityState>) {
-    this.visibility = {
-      ...this.visibility,
-      ...visibility,
-      gerber: {
-        ...this.visibility.gerber,
-        ...(visibility.gerber || {}),
-      },
-      overlays: {
-        ...this.visibility.overlays,
-        ...(visibility.overlays || {}),
-      },
-    };
+    this.visibility.setState(visibility);
     this.requestRender("visibility-change");
   }
 
   getVisibility(): VisibilityState {
-    return this.visibility;
+    return this.visibility.getState();
+  }
+
+  // Convenience methods for specific visibility controls
+  setGerberVisibility(layer: keyof VisibilityState['gerber'], visible: boolean) {
+    this.visibility.setGerberVisibility(layer, visible);
+    this.requestRender("gerber-visibility");
+  }
+
+  setOverlayVisibility(id: string, visible: boolean) {
+    this.visibility.setOverlayVisibility(id, visible);
+    this.requestRender("overlay-visibility");
+  }
+
+  setMarkersVisibility(visible: boolean) {
+    this.visibility.setMarkersVisibility(visible);
+    this.requestRender("markers-visibility");
+  }
+
+  // Toggle methods
+  toggleGerberLayer(layer: keyof VisibilityState['gerber']) {
+    this.visibility.toggleGerberLayer(layer);
+    this.requestRender("gerber-toggle");
+  }
+
+  toggleOverlay(id: string) {
+    this.visibility.toggleOverlay(id);
+    this.requestRender("overlay-toggle");
+  }
+
+  toggleMarkers() {
+    this.visibility.toggleMarkers();
+    this.requestRender("markers-toggle");
+  }
+
+  // Presets
+  applyVisibilityPreset(preset: 'all' | 'none' | 'copper-only' | 'minimal') {
+    this.visibility.applyPreset(preset);
+    this.requestRender("visibility-preset");
+  }
+
+  // Subscription for reactive updates
+  onVisibilityChange(callback: (state: VisibilityState) => void) {
+    return this.visibility.subscribe(callback);
+  }
+
+  // Public access to overlay API for render passes
+  getOverlayApi(): OverlayApi {
+    return this.overlayApi;
   }
 
   // Utility methods
@@ -201,7 +250,24 @@ export class Viewer {
     return this.xform.boardToScreen({ x: boardX, y: boardY });
   }
 
-  // Helper to create render context for picking
+  // Helper to convert canvas events to pixel coordinates
+  private eventToCanvasPx(ev: MouseEvent) {
+    const rect = this.canvas.getBoundingClientRect();
+    return {
+      x_px: ev.clientX - rect.left,
+      y_px: ev.clientY - rect.top
+    };
+  }
+
+  // Emit view change events when camera moves
+  private emitViewChange() {
+    const camera = this.xform.getCamera();
+    this.emit("view:change", {
+      center_mm: camera.center_mm,
+      zoom: camera.zoom,
+      rotation_rad: camera.rotation_rad || 0
+    });
+  }
   private createRenderCtx() {
     const viewport = { width_px: this.canvas.width, height_px: this.canvas.height };
     this.xform.setViewport(viewport);
@@ -212,7 +278,7 @@ export class Viewer {
       viewport,
       xform: this.xform,
       now_ms: performance.now(),
-      visibility: this.visibilityGetter(),
+      visibility: this.visibility.getState(),
       boardToScreen: (p: { x: number; y: number }) => this.xform.boardToScreen({ x: p.x, y: p.y }),
       screenToBoard: (p: { x: number; y: number }) => this.xform.screenToBoard({ x: p.x, y: p.y }),
     };
@@ -235,11 +301,6 @@ export class Viewer {
     if (!ov) return;
     ov.onRemove?.();
     this.requestRender(`overlay:remove:${id}`);
-  }
-
-  setOverlayVisibility(id: string, visible: boolean) {
-    this.overlays.setVisible(id, visible);
-    this.requestRender(`overlay:vis:${id}:${visible}`);
   }
 
   getOverlayRegistry() {
@@ -291,9 +352,22 @@ export class Viewer {
   }
 
   // Marker selection
-  selectMarker(id: string | null) {
+  selectMarker(id: string | null, opts?: { center?: boolean; animate?: boolean }) {
+    if (id === this.selectedMarkerId) return; // no spam
     this.selectedMarkerId = id;
-    this.requestRender(`marker:select:${id}`);
+
+    if (id) {
+      const marker = this.markers.get(id);
+      this.emit("select:marker", { markerId: id, marker });
+      if (opts?.center && marker) {
+        // TODO: Implement zoomTo method
+        // this.zoomTo({ x_mm: marker.x_mm, y_mm: marker.y_mm, radius_mm: 10, animate: opts.animate ?? true });
+      }
+    } else {
+      this.emit("select:marker", { markerId: null });
+    }
+
+    this.requestRender("selection-change");
   }
 
   getSelectedMarker(): Marker | null {
@@ -308,13 +382,43 @@ export class Viewer {
     };
   }
 
+  // Mouse event handling for picking and events
+  handleMouseMove(ev: MouseEvent) {
+    const { x_px, y_px } = this.eventToCanvasPx(ev);
+    const rc = this.createRenderCtx();
+
+    const hit = this.markerPicker.pick(rc, x_px, y_px, 10);
+    this.setHoverMarker(hit?.id ?? null);
+  }
+
+  handleMouseClick(ev: MouseEvent) {
+    const { x_px, y_px } = this.eventToCanvasPx(ev);
+    const rc = this.createRenderCtx();
+
+    const hit = this.markerPicker.pick(rc, x_px, y_px, 10);
+    if (hit) {
+      this.selectMarker(hit.id);
+      return;
+    }
+
+    const b = rc.screenToBoard({ x: x_px, y: y_px });
+    this.emit("click:board", { x_mm: b.x, y_mm: b.y });
+  }
+
+  // Method to set up event listeners (call after viewer creation)
+  setupEventListeners() {
+    this.canvas.addEventListener("mousemove", (ev) => this.handleMouseMove(ev));
+    this.canvas.addEventListener("click", (ev) => this.handleMouseClick(ev));
+  }
+
   // Debug method to get render pipeline info
   getDebugInfo() {
+    const rc = this.createRenderCtx();
     return {
       passes: this.passes.map(p => ({
         id: p.id,
         order: p.order,
-        enabled: p.enabled(),
+        enabled: p.enabled(rc),
       })),
       pendingRender: this.scheduler.isPending(),
       pendingReasons: this.scheduler.getPendingReasons(),

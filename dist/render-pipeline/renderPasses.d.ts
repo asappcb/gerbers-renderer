@@ -1,6 +1,6 @@
-import { RenderCtx, RenderPass, VisibilityState } from './core/renderContract';
+import { RenderCtx, RenderPass, VisibilityState, OverlayApi } from './core/renderContract';
 import { ViewportTransform } from './core/viewportTransform';
-export declare function createGerberPass(id: string, order: number, layerType: keyof VisibilityState['gerber'], drawLayer: (ctx: CanvasRenderingContext2D) => void, getVisibility: () => VisibilityState): RenderPass;
+export declare function createGerberPass(id: string, order: number, layerType: keyof VisibilityState['gerber'], drawLayer: (ctx: CanvasRenderingContext2D) => void): RenderPass;
 export interface Overlay {
     id: string;
     visible: boolean;
@@ -34,7 +34,7 @@ export declare class OverlayRegistry {
     setVisible(id: string, visible: boolean): void;
     getAll(): Overlay[];
 }
-export declare function createOverlayPass(registry: OverlayRegistry): RenderPass;
+export declare function createOverlayPass(registry: OverlayRegistry, overlayApi: OverlayApi): RenderPass;
 export interface Marker {
     id: string;
     position: {
@@ -54,7 +54,7 @@ export declare class MarkerRenderer {
     draw(rc: RenderCtx): void;
     private drawMarker;
 }
-export declare function createMarkerPass(renderer: MarkerRenderer, getVisibility: () => VisibilityState): RenderPass;
+export declare function createMarkerPass(renderer: MarkerRenderer): RenderPass;
 export interface Selection {
     type: 'marker' | 'geometry' | 'region';
     id?: string;

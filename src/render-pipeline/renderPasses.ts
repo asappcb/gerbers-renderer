@@ -1,4 +1,4 @@
-import { RenderCtx, RenderPass, VisibilityState, RENDER_ORDER } from './core/renderContract';
+import { RenderCtx, RenderPass, VisibilityState, RENDER_ORDER, OverlayApi } from './core/renderContract';
 import { ViewportTransform, Vec2 } from './core/viewportTransform';
 
 // Base Gerber Passes
@@ -6,13 +6,12 @@ export function createGerberPass(
   id: string,
   order: number,
   layerType: keyof VisibilityState['gerber'],
-  drawLayer: (ctx: CanvasRenderingContext2D) => void,
-  getVisibility: () => VisibilityState
+  drawLayer: (ctx: CanvasRenderingContext2D) => void
 ): RenderPass {
   return {
     id: `gerber:${id}`,
     order,
-    enabled: () => getVisibility().gerber[layerType],
+    enabled: (rc: RenderCtx) => rc.visibility.gerber[layerType],
     draw: (rc) => {
       const ctx = rc.ctx;
       const m = rc.xform.getWorldToScreenMatrix();
@@ -74,11 +73,11 @@ export class OverlayRegistry {
   }
 }
 
-export function createOverlayPass(registry: OverlayRegistry): RenderPass {
+export function createOverlayPass(registry: OverlayRegistry, overlayApi: OverlayApi): RenderPass {
   return {
     id: "overlay:all",
     order: (RENDER_ORDER.OVERLAYS_MIN + RENDER_ORDER.OVERLAYS_MAX) / 2,
-    enabled: () => true,
+    enabled: (rc: RenderCtx) => true,
     draw: (rc) => {
       // Get all overlays and filter by visibility manager state
       const overlays = registry.getAll();
@@ -90,14 +89,17 @@ export function createOverlayPass(registry: OverlayRegistry): RenderPass {
       // Sort by zIndex and draw
       visibleOverlays.sort((a, b) => a.zIndex - b.zIndex);
       
+      // Create OverlayHelpers for overlays
+      const helpers = {
+        boardToScreen: rc.boardToScreen,
+        screenToBoard: rc.screenToBoard,
+        xform: rc.xform,
+        view: rc.xform.getCamera(),
+      };
+      
       for (const overlay of visibleOverlays) {
         rc.ctx.save();
-        overlay.draw(rc.ctx, {
-          boardToScreen: rc.boardToScreen,
-          screenToBoard: rc.screenToBoard,
-          xform: rc.xform,
-          view: rc.xform.getCamera(),
-        });
+        overlay.draw(rc.ctx, helpers);
         rc.ctx.restore();
       }
     },
@@ -190,11 +192,11 @@ export class MarkerRenderer {
   }
 }
 
-export function createMarkerPass(renderer: MarkerRenderer, getVisibility: () => VisibilityState): RenderPass {
+export function createMarkerPass(renderer: MarkerRenderer): RenderPass {
   return {
     id: "markers",
     order: (RENDER_ORDER.MARKERS_MIN + RENDER_ORDER.MARKERS_MAX) / 2,
-    enabled: () => getVisibility().markers,
+    enabled: (rc: RenderCtx) => rc.visibility.markers,
     draw: (rc) => renderer.draw(rc),
   };
 }
@@ -264,7 +266,11 @@ export function createSelectionPass(renderer: SelectionRenderer, getSelection: (
   return {
     id: "selection",
     order: (RENDER_ORDER.SELECTION_MIN + RENDER_ORDER.SELECTION_MAX) / 2,
-    enabled: () => getSelection() !== null,
-    draw: (rc) => renderer.draw(rc, getSelection()),
+    enabled: (rc: RenderCtx) => true, // Selection is always enabled when present
+    draw: (rc) => {
+      const selection = getSelection();
+      if (!selection) return;
+      renderer.draw(rc, selection);
+    },
   };
 }

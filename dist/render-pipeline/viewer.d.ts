@@ -1,6 +1,7 @@
-import { RenderPass, VisibilityState, Overlay, Marker } from './core/renderContract';
+import { RenderPass, VisibilityState, OverlayApi, Overlay, Marker } from './core/renderContract';
 import { CameraState } from './core/viewportTransform';
 import { OverlayRegistry } from './overlayRegistry';
+import { ViewerEvents } from './viewerEvents';
 export declare class Viewer {
     private canvas;
     private ctx;
@@ -8,7 +9,6 @@ export declare class Viewer {
     private visibility;
     private passes;
     private scheduler;
-    private visibilityGetter;
     private overlays;
     private overlayApi;
     private boardBounds;
@@ -16,8 +16,13 @@ export declare class Viewer {
     private markerPicker;
     private selectedMarkerId;
     private hoverMarkerId;
+    private events;
+    on: <K extends keyof ViewerEvents>(event: K, cb: (payload: ViewerEvents[K]) => void) => import('./events').Unsubscribe;
+    once: <K extends keyof ViewerEvents>(event: K, cb: (payload: ViewerEvents[K]) => void) => import('./events').Unsubscribe;
+    off: <K extends keyof ViewerEvents>(event: K, cb: (payload: ViewerEvents[K]) => void) => void;
+    private emit;
+    private setHoverMarker;
     constructor(canvas: HTMLCanvasElement, initialCamera: CameraState);
-    setVisibilityGetter(getVisibility: () => VisibilityState): void;
     private setupResizeHandling;
     private registerDefaultPasses;
     addPass(pass: RenderPass): void;
@@ -29,8 +34,19 @@ export declare class Viewer {
     getCamera(): Required<CameraState>;
     setVisibility(visibility: Partial<VisibilityState>): void;
     getVisibility(): VisibilityState;
+    setGerberVisibility(layer: keyof VisibilityState['gerber'], visible: boolean): void;
+    setOverlayVisibility(id: string, visible: boolean): void;
+    setMarkersVisibility(visible: boolean): void;
+    toggleGerberLayer(layer: keyof VisibilityState['gerber']): void;
+    toggleOverlay(id: string): void;
+    toggleMarkers(): void;
+    applyVisibilityPreset(preset: 'all' | 'none' | 'copper-only' | 'minimal'): void;
+    onVisibilityChange(callback: (state: VisibilityState) => void): () => void;
+    getOverlayApi(): OverlayApi;
     screenToBoard(screenX: number, screenY: number): import('..').Vec2;
     boardToScreen(boardX: number, boardY: number): import('..').Vec2;
+    private eventToCanvasPx;
+    private emitViewChange;
     private createRenderCtx;
     setBoardBounds(bounds: {
         minX_mm: number;
@@ -42,7 +58,6 @@ export declare class Viewer {
         id: string;
     }): void;
     removeOverlay(id: string): void;
-    setOverlayVisibility(id: string, visible: boolean): void;
     getOverlayRegistry(): OverlayRegistry;
     addMarker(marker: Marker): void;
     addMarkers(markers: Marker[]): void;
@@ -52,12 +67,18 @@ export declare class Viewer {
     listMarkers(): Marker[];
     clearMarkers(): void;
     pickMarker(x_px: number, y_px: number, pickRadius_px?: number): import('..').MarkerHit | null;
-    selectMarker(id: string | null): void;
+    selectMarker(id: string | null, opts?: {
+        center?: boolean;
+        animate?: boolean;
+    }): void;
     getSelectedMarker(): Marker | null;
     getMarkerState(): {
         selectedId: string | null;
         hoverId: string | null;
     };
+    handleMouseMove(ev: MouseEvent): void;
+    handleMouseClick(ev: MouseEvent): void;
+    setupEventListeners(): void;
     getDebugInfo(): {
         passes: {
             id: string;

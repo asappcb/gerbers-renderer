@@ -66,7 +66,7 @@ export type RenderCtx = {
 export type RenderPass = {
   id: string;
   order: number;
-  enabled: () => boolean;
+  enabled: (rc: RenderCtx) => boolean;
   draw: (rc: RenderCtx) => void;
 };
 

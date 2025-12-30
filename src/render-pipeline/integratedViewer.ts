@@ -97,8 +97,10 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
 
   const visibility = new VisibilityManager();
   
-  // Set the visibility getter to always get the current state
-  viewer.setVisibilityGetter(() => visibility.getState());
+  // Set up visibility change subscription to trigger renders
+  visibility.subscribe(() => {
+    viewer.requestRender("visibility-change");
+  });
   const overlayRegistry = new OverlayRegistry();
   const markerRenderer = new MarkerRenderer();
   const selectionRenderer = new SelectionRenderer();
@@ -205,8 +207,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   visibility.setMarkersVisibility(false);
 
   // Add render passes
-  viewer.addPass(createOverlayPass(overlayRegistry));
-  viewer.addPass(createMarkerPass(markerRenderer, () => visibility.getState()));
+  viewer.addPass(createOverlayPass(overlayRegistry, viewer.getOverlayApi()));
+  viewer.addPass(createMarkerPass(markerRenderer));
   viewer.addPass(createSelectionPass(selectionRenderer, () => currentSelection));
 
   // State
@@ -461,11 +463,6 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   window.addEventListener("resize", () => {
     resizeCanvas();
     if (!didInteract) fitBoardToViewport(0.08);
-  });
-
-  // Visibility subscription
-  visibility.subscribe(() => {
-    viewer.requestRender("visibility-change");
   });
 
   function mustGet<T extends HTMLElement>(root: HTMLElement, selector: string): T {

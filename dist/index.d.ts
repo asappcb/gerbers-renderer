@@ -20,6 +20,8 @@ export { MarkerPicker } from './render-pipeline/markerPicker';
 export { createMarkerPass } from './render-pipeline/markerPass';
 export { UniformGridIndex } from './render-pipeline/uniformGridIndex';
 export type { Marker, MarkerHit } from './render-pipeline/core/renderContract';
+export { Emitter } from './render-pipeline/events';
+export type { ViewerEvents } from './render-pipeline/viewerEvents';
 export { SelectionRenderer, createGerberPass, createSelectionPass, type OverlayHelpers, type Selection } from './render-pipeline/renderPasses';
 export type { RenderCtx, RenderPass, VisibilityState } from './render-pipeline/core/renderContract';
 export type { CameraState, Viewport, Vec2, Mat3 } from './render-pipeline/core/viewportTransform';

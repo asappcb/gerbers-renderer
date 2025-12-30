@@ -34,6 +34,10 @@ export { createMarkerPass } from "./render-pipeline/markerPass";
 export { UniformGridIndex } from "./render-pipeline/uniformGridIndex";
 export type { Marker, MarkerHit } from "./render-pipeline/core/renderContract";
 
+// Event system
+export { Emitter } from "./render-pipeline/events";
+export type { ViewerEvents } from "./render-pipeline/viewerEvents";
+
 // Render passes
 export { 
   SelectionRenderer,
