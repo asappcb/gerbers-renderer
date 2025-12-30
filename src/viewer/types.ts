@@ -32,10 +32,3 @@ export type ViewerLayers = Partial<{
 }>;
 
 export type ViewerSideMode = "top" | "bottom";
-
-export type BoardViewer = {
-  setData: (data: { boardGeom: BoardGeom; layers: ViewerLayers }) => void;
-  setSideMode: (mode: ViewerSideMode) => void;
-  fit: () => void;
-  dispose: () => void;
-};

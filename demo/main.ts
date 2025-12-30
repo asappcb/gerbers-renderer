@@ -1,6 +1,5 @@
 // demo/main.ts
 import {
-  createBoardViewer,
   createIntegratedViewer,
   renderGerbers,
   detectGerberBundle,
