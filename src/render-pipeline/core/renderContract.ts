@@ -1,5 +1,23 @@
 import { ViewportTransform, Vec2 } from './viewportTransform';
 
+export type Marker = {
+  id: string;
+  x_mm: number;
+  y_mm: number;
+
+  // Optional metadata
+  layer?: "top" | "bottom";
+  severity?: "error" | "warning" | "info";
+  radius_mm?: number; // optional if you later draw in world units
+  data?: Record<string, any>;
+};
+
+export type MarkerHit = {
+  id: string;
+  marker: Marker;
+  distance_px: number;
+};
+
 export type OverlayApi = {
   // Conversion helpers
   boardToScreen: (p: { x_mm: number; y_mm: number }) => { x_px: number; y_px: number };

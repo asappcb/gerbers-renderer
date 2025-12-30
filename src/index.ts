@@ -25,14 +25,21 @@ export {
   createPulsingMarkerOverlay
 } from "./render-pipeline/exampleOverlays";
 export type { OverlayApi, Overlay } from "./render-pipeline/core/renderContract";
+
+// Marker system
+export { MarkerStore } from "./render-pipeline/markerStore";
+export { MarkerRenderer } from "./render-pipeline/markerRenderer";
+export { MarkerPicker } from "./render-pipeline/markerPicker";
+export { createMarkerPass } from "./render-pipeline/markerPass";
+export { UniformGridIndex } from "./render-pipeline/uniformGridIndex";
+export type { Marker, MarkerHit } from "./render-pipeline/core/renderContract";
+
+// Render passes
 export { 
-  MarkerRenderer, 
   SelectionRenderer,
   createGerberPass,
-  createMarkerPass,
   createSelectionPass,
   type OverlayHelpers,
-  type Marker,
   type Selection
 } from "./render-pipeline/renderPasses";
 export type { 

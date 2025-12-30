@@ -1,4 +1,4 @@
-import { RenderPass, VisibilityState, Overlay } from './core/renderContract';
+import { RenderPass, VisibilityState, Overlay, Marker } from './core/renderContract';
 import { CameraState } from './core/viewportTransform';
 import { OverlayRegistry } from './overlayRegistry';
 export declare class Viewer {
@@ -12,6 +12,10 @@ export declare class Viewer {
     private overlays;
     private overlayApi;
     private boardBounds;
+    private markers;
+    private markerPicker;
+    private selectedMarkerId;
+    private hoverMarkerId;
     constructor(canvas: HTMLCanvasElement, initialCamera: CameraState);
     setVisibilityGetter(getVisibility: () => VisibilityState): void;
     private setupResizeHandling;
@@ -27,6 +31,7 @@ export declare class Viewer {
     getVisibility(): VisibilityState;
     screenToBoard(screenX: number, screenY: number): import('..').Vec2;
     boardToScreen(boardX: number, boardY: number): import('..').Vec2;
+    private createRenderCtx;
     setBoardBounds(bounds: {
         minX_mm: number;
         minY_mm: number;
@@ -39,6 +44,20 @@ export declare class Viewer {
     removeOverlay(id: string): void;
     setOverlayVisibility(id: string, visible: boolean): void;
     getOverlayRegistry(): OverlayRegistry;
+    addMarker(marker: Marker): void;
+    addMarkers(markers: Marker[]): void;
+    removeMarker(id: string): void;
+    updateMarker(id: string, updates: Partial<Marker>): void;
+    getMarker(id: string): Marker | undefined;
+    listMarkers(): Marker[];
+    clearMarkers(): void;
+    pickMarker(x_px: number, y_px: number, pickRadius_px?: number): import('..').MarkerHit | null;
+    selectMarker(id: string | null): void;
+    getSelectedMarker(): Marker | null;
+    getMarkerState(): {
+        selectedId: string | null;
+        hoverId: string | null;
+    };
     getDebugInfo(): {
         passes: {
             id: string;

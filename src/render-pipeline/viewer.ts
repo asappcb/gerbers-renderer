@@ -1,7 +1,9 @@
 import { RenderScheduler } from './core/renderScheduler';
-import { RenderCtx, RenderPass, VisibilityState, RENDER_ORDER, OverlayApi, Overlay } from './core/renderContract';
+import { RenderCtx, RenderPass, VisibilityState, RENDER_ORDER, OverlayApi, Overlay, Marker } from './core/renderContract';
 import { ViewportTransform, CameraState, Viewport } from './core/viewportTransform';
 import { OverlayRegistry } from './overlayRegistry';
+import { MarkerStore } from './markerStore';
+import { MarkerPicker } from './markerPicker';
 
 export class Viewer {
   private canvas: HTMLCanvasElement;
@@ -14,6 +16,12 @@ export class Viewer {
   private overlays = new OverlayRegistry();
   private overlayApi: OverlayApi;
   private boardBounds = { minX_mm: 0, minY_mm: 0, maxX_mm: 100, maxY_mm: 100 }; // Default bounds
+  
+  // Marker system
+  private markers = new MarkerStore();
+  private markerPicker = new MarkerPicker(this.markers);
+  private selectedMarkerId: string | null = null;
+  private hoverMarkerId: string | null = null;
 
   constructor(canvas: HTMLCanvasElement, initialCamera: CameraState) {
     this.canvas = canvas;
@@ -193,6 +201,23 @@ export class Viewer {
     return this.xform.boardToScreen({ x: boardX, y: boardY });
   }
 
+  // Helper to create render context for picking
+  private createRenderCtx() {
+    const viewport = { width_px: this.canvas.width, height_px: this.canvas.height };
+    this.xform.setViewport(viewport);
+
+    return {
+      canvas: this.canvas,
+      ctx: this.ctx,
+      viewport,
+      xform: this.xform,
+      now_ms: performance.now(),
+      visibility: this.visibilityGetter(),
+      boardToScreen: (p: { x: number; y: number }) => this.xform.boardToScreen({ x: p.x, y: p.y }),
+      screenToBoard: (p: { x: number; y: number }) => this.xform.screenToBoard({ x: p.x, y: p.y }),
+    };
+  }
+
   // Board bounds management
   setBoardBounds(bounds: { minX_mm: number; minY_mm: number; maxX_mm: number; maxY_mm: number }) {
     this.boardBounds = bounds;
@@ -219,6 +244,68 @@ export class Viewer {
 
   getOverlayRegistry() {
     return this.overlays;
+  }
+
+  // Marker management
+  addMarker(marker: Marker) {
+    this.markers.add(marker);
+    this.requestRender(`marker:add:${marker.id}`);
+  }
+
+  addMarkers(markers: Marker[]) {
+    this.markers.addMany(markers);
+    this.requestRender(`markers:add:${markers.length}`);
+  }
+
+  removeMarker(id: string) {
+    this.markers.remove(id);
+    if (this.selectedMarkerId === id) this.selectedMarkerId = null;
+    if (this.hoverMarkerId === id) this.hoverMarkerId = null;
+    this.requestRender(`marker:remove:${id}`);
+  }
+
+  updateMarker(id: string, updates: Partial<Marker>) {
+    this.markers.updateMany([{ id, ...updates }]);
+    this.requestRender(`marker:update:${id}`);
+  }
+
+  getMarker(id: string): Marker | undefined {
+    return this.markers.get(id);
+  }
+
+  listMarkers(): Marker[] {
+    return this.markers.list();
+  }
+
+  clearMarkers() {
+    this.markers.clear();
+    this.selectedMarkerId = null;
+    this.hoverMarkerId = null;
+    this.requestRender('markers:clear');
+  }
+
+  // Marker picking
+  pickMarker(x_px: number, y_px: number, pickRadius_px = 10) {
+    const rc = this.createRenderCtx();
+    return this.markerPicker.pick(rc, x_px, y_px, pickRadius_px);
+  }
+
+  // Marker selection
+  selectMarker(id: string | null) {
+    this.selectedMarkerId = id;
+    this.requestRender(`marker:select:${id}`);
+  }
+
+  getSelectedMarker(): Marker | null {
+    return this.selectedMarkerId ? this.markers.get(this.selectedMarkerId) || null : null;
+  }
+
+  // Get marker state for render pass
+  getMarkerState() {
+    return {
+      selectedId: this.selectedMarkerId,
+      hoverId: this.hoverMarkerId,
+    };
   }
 
   // Debug method to get render pipeline info

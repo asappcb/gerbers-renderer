@@ -18,7 +18,8 @@ Designed for:
 - 🎨 Canvas-based board viewer with modern render pipeline
 - 🧩 Drop-in viewer that mounts into any DOM node
 - 🎯 Overlay system for custom visualizations
-- 📍 Built-in marker and selection systems
+- 📍 High-performance marker system with spatial indexing
+- 🎯 Built-in selection and interaction systems
 - 🧪 Typed, deterministic render results
 - 🧼 No backend, no workers unless needed
 - ⚡ Vite, React, vanilla JS friendly
@@ -52,17 +53,24 @@ viewer.setData({
 });
 viewer.fit();
 
-// New features: markers, selections, custom overlays
-viewer.addMarker({
-  id: "test-point",
-  position: { x: 10, y: 5 }, // mm coordinates
-  type: "testpoint"
-});
-
 viewer.setSelection({
   type: "region",
   bounds: { min: { x: 0, y: 0 }, max: { x: 20, y: 10 } }
 });
+
+// Add markers for DFM analysis
+viewer.addMarker({
+  id: "via-issue",
+  x_mm: 12.5,
+  y_mm: 8.3,
+  severity: "error",
+  data: { issue: "Via too close to trace" }
+});
+
+viewer.addMarkers([
+  { id: "test1", x_mm: 5, y_mm: 5, severity: "info" },
+  { id: "test2", x_mm: 15, y_mm: 10, severity: "warning" }
+]);
 ```
 
 **Documentation**: See [MIGRATION.md](./MIGRATION.md) for detailed usage guide.
@@ -395,6 +403,134 @@ registry.setZIndex("dfm:dots", 100); // Change render order
 - **Efficient rendering**: Sorted by zIndex, filtered by visibility
 - **Animation support**: Use `api.requestRender()` for smooth animations
 - **Lifecycle hooks**: `onAdd()` and `onRemove()` for setup/cleanup
+
+## Marker System
+
+The integrated viewer includes a high-performance marker system for interactive annotations, test points, and DFM indicators:
+
+### Adding Markers
+
+```typescript
+// Add individual markers
+viewer.addMarker({
+  id: "test-point-1",
+  x_mm: 10.5,
+  y_mm: 15.2,
+  severity: "error", // "error" | "warning" | "info"
+  layer: "top",    // "top" | "bottom"
+  data: { description: "Via too close to trace" }
+});
+
+// Add multiple markers efficiently
+viewer.addMarkers([
+  { id: "error1", x_mm: 20, y_mm: 25, severity: "error" },
+  { id: "warn1", x_mm: 30, y_mm: 35, severity: "warning" },
+  { id: "info1", x_mm: 40, y_mm: 45, severity: "info" }
+]);
+```
+
+### Marker Types
+
+```typescript
+type Marker = {
+  id: string;
+  x_mm: number;
+  y_mm: number;
+  
+  // Optional metadata
+  layer?: "top" | "bottom";
+  severity?: "error" | "warning" | "info";
+  radius_mm?: number; // For future world-space rendering
+  data?: Record<string, any>; // Custom data
+};
+```
+
+### Marker Management
+
+```typescript
+// Update marker properties
+viewer.updateMarker("test-point-1", { 
+  severity: "warning",
+  x_mm: 11.0 // Position changes update spatial index automatically
+});
+
+// Remove markers
+viewer.removeMarker("test-point-1");
+
+// Get marker by ID
+const marker = viewer.getMarker("test-point-1");
+
+// List all markers
+const allMarkers = viewer.listMarkers();
+
+// Clear all markers
+viewer.clearMarkers();
+```
+
+### Marker Picking and Selection
+
+```typescript
+// Pick marker at screen coordinates
+const hit = viewer.pickMarker(mouseX, mouseY, 10); // 10px pick radius
+
+if (hit) {
+  console.log(`Hit marker: ${hit.id} at ${hit.distance_px.toFixed(1)}px`);
+  viewer.selectMarker(hit.id);
+  
+  // Access selected marker
+  const selected = viewer.getSelectedMarker();
+  console.log("Selected:", selected?.data);
+}
+
+// Clear selection
+viewer.selectMarker(null);
+```
+
+### Marker Styling
+
+Markers are automatically styled by severity:
+- **Error**: Red circles
+- **Warning**: Orange circles  
+- **Info**: Blue circles
+- **Default**: Gray circles
+
+Selected markers have a blue outline, hovered markers have orange highlighting.
+
+### Performance Features
+
+```typescript
+// The marker system uses:
+// - O(1) lookup via Map storage
+// - Uniform grid spatial index for fast queries
+// - Viewport culling to skip off-screen markers
+// - Constant pixel radius (4px) for visibility at all zooms
+// - Cached list iteration with dirty flag optimization
+```
+
+### Advanced Usage
+
+```typescript
+// Batch updates for performance
+viewer.updateMarkers([
+  { id: "marker1", severity: "warning" },
+  { id: "marker2", x_mm: 25.0, y_mm: 30.0 }
+]);
+
+// Query markers near a point (for custom tools)
+const nearby = viewer.markers.queryNear(20, 20, 5); // 5mm radius
+
+// Access underlying systems for advanced integration
+const store = viewer.getMarkerStore();
+const picker = viewer.getMarkerPicker();
+```
+
+**Key Features:**
+- **High Performance**: Spatial index with O(1) lookup
+- **Zoom-Aware Picking**: Accurate hit detection at any zoom level
+- **Automatic Styling**: Severity-based color coding
+- **Interactive Selection**: Click to select, hover for feedback
+- **Batch Operations**: Efficient bulk updates
+- **Custom Data**: Attach any metadata via `data` property
 
 ### Render Pipeline
 
