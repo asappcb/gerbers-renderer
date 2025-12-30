@@ -1,6 +1,6 @@
 {
   "name": "gerbers-renderer",
-  "version": "0.1.4",
+  "version": "1.1.4",
   "description": "A frontend-only Gerber viewer for rendering PCB Gerbers directly in the browser.",
   "private": false,
   "type": "module",
