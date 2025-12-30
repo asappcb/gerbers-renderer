@@ -1,6 +1,7 @@
 import { RenderScheduler } from './core/renderScheduler';
-import { RenderCtx, RenderPass, VisibilityState, RENDER_ORDER } from './core/renderContract';
+import { RenderCtx, RenderPass, VisibilityState, RENDER_ORDER, OverlayApi, Overlay } from './core/renderContract';
 import { ViewportTransform, CameraState, Viewport } from './core/viewportTransform';
+import { OverlayRegistry } from './overlayRegistry';
 
 export class Viewer {
   private canvas: HTMLCanvasElement;
@@ -10,6 +11,9 @@ export class Viewer {
   private passes: RenderPass[] = [];
   private scheduler: RenderScheduler;
   private visibilityGetter: () => VisibilityState = () => this.visibility; // Default getter
+  private overlays = new OverlayRegistry();
+  private overlayApi: OverlayApi;
+  private boardBounds = { minX_mm: 0, minY_mm: 0, maxX_mm: 100, maxY_mm: 100 }; // Default bounds
 
   constructor(canvas: HTMLCanvasElement, initialCamera: CameraState) {
     this.canvas = canvas;
@@ -37,6 +41,25 @@ export class Viewer {
     };
 
     this.scheduler = new RenderScheduler(() => this.render());
+
+    // Create stable overlay API
+    this.overlayApi = {
+      boardToScreen: ({ x_mm, y_mm }) => {
+        const p = this.xform.boardToScreen({ x: x_mm, y: y_mm });
+        return { x_px: p.x, y_px: p.y };
+      },
+      screenToBoard: ({ x_px, y_px }) => {
+        const p = this.xform.screenToBoard({ x: x_px, y: y_px });
+        return { x_mm: p.x, y_mm: p.y };
+      },
+      getViewState: () => {
+        const cam = this.xform.getCamera();
+        return { center_mm: cam.center_mm, zoom: cam.zoom, rotation_rad: cam.rotation_rad };
+      },
+      getViewport: () => ({ width_px: this.canvas.width, height_px: this.canvas.height }),
+      getBoardBounds: () => this.boardBounds,
+      requestRender: (reason) => this.requestRender(reason),
+    };
 
     // Register default passes
     this.registerDefaultPasses();
@@ -168,6 +191,34 @@ export class Viewer {
 
   boardToScreen(boardX: number, boardY: number) {
     return this.xform.boardToScreen({ x: boardX, y: boardY });
+  }
+
+  // Board bounds management
+  setBoardBounds(bounds: { minX_mm: number; minY_mm: number; maxX_mm: number; maxY_mm: number }) {
+    this.boardBounds = bounds;
+  }
+
+  // Overlay management
+  addOverlayLayer(overlay: Omit<Overlay, "id"> & { id: string }) {
+    this.overlays.add(overlay as Overlay);
+    overlay.onAdd?.(this.overlayApi);
+    this.requestRender(`overlay:add:${overlay.id}`);
+  }
+
+  removeOverlay(id: string) {
+    const ov = this.overlays.remove(id);
+    if (!ov) return;
+    ov.onRemove?.();
+    this.requestRender(`overlay:remove:${id}`);
+  }
+
+  setOverlayVisibility(id: string, visible: boolean) {
+    this.overlays.setVisible(id, visible);
+    this.requestRender(`overlay:vis:${id}:${visible}`);
+  }
+
+  getOverlayRegistry() {
+    return this.overlays;
   }
 
   // Debug method to get render pipeline info

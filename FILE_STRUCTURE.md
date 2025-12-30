@@ -1,7 +1,7 @@
 # File Structure Organization
 
 ## Overview
-The gerbers-renderer project has been reorganized to separate the legacy DOM-based viewer from the new canvas-based render pipeline system.
+The gerbers-renderer project uses a modern canvas-based render pipeline system for PCB visualization and rendering.
 
 ## Directory Structure
 
@@ -10,8 +10,8 @@ src/
 ├── core/                    # Core functionality (detection, errors, etc.)
 ├── io/                      # I/O operations
 ├── parse/                   # Parsing utilities
-├── render/                  # Legacy rendering system
-├── render-pipeline/         # NEW: Modern canvas-based render pipeline
+├── render/                  # Rendering utilities
+├── render-pipeline/         # Modern canvas-based render pipeline
 │   ├── core/               # Core render pipeline components
 │   │   ├── renderContract.ts      # Render context and contracts
 │   │   ├── renderScheduler.ts     # Render scheduling system
@@ -25,24 +25,18 @@ src/
 │   ├── viewer.test.ts       # Tests for viewer system
 │   └── visibilityManager.ts # Visibility state management
 ├── types/                   # TypeScript type definitions
-├── viewer/                  # Legacy DOM-based viewer
-│   ├── BoardViewer.ts       # Legacy board viewer implementation
-│   ├── types.ts             # Legacy viewer types
-│   └── viewer.css           # Legacy viewer styles
+├── viewer/                  # Shared viewer types and styles
+│   ├── types.ts             # Shared TypeScript types
+│   └── viewer.css           # Viewer styles
 └── index.ts                 # Main exports
 ```
 
-## Legacy vs New Systems
+## Render Pipeline System
 
-### Legacy System (src/viewer/)
-- **BoardViewer.ts**: DOM-based rendering with CSS transforms
-- **Uses**: HTML `<img>` elements, CSS transforms
-- **Status**: Maintained for backward compatibility
-
-### New Render Pipeline (src/render-pipeline/)
+### Modern Render Pipeline (src/render-pipeline/)
 - **Integrated Viewer**: Canvas-based rendering with modern pipeline
 - **Uses**: Single canvas, mathematical transforms, render passes
-- **Status**: Production-ready, recommended for new projects
+- **Status**: Production-ready, actively maintained
 
 ## Key Components
 
@@ -58,21 +52,16 @@ src/
 - `renderPasses.ts`: Render pass factories and utilities
 - `visibilityManager.ts`: Centralized visibility management
 
-## Migration Path
+## Usage
 
-1. **Legacy**: Continue using `createBoardViewer()` from `src/viewer/`
-2. **New**: Use `createIntegratedViewer()` from `src/render-pipeline/`
-3. **Hybrid**: Both systems can coexist in the same application
+Use `createIntegratedViewer()` from `src/render-pipeline/` for all new projects:
 
 ## Exports
 
 All functionality is exported through the main `index.ts` file:
 
 ```typescript
-// Legacy
-import { createBoardViewer } from "gerbers-renderer";
-
-// New render pipeline
+// Modern render pipeline
 import { 
   createIntegratedViewer,
   Viewer,
@@ -84,9 +73,9 @@ import {
 
 ## Benefits of Organization
 
-1. **Clear Separation**: Legacy and new systems are clearly separated
+1. **Modern Architecture**: Canvas-based render pipeline system
 2. **Modularity**: Each component has a single responsibility
 3. **Maintainability**: Easy to locate and modify specific functionality
 4. **Testability**: Tests are co-located with their modules
 5. **Scalability**: Easy to add new render passes and features
-6. **Backward Compatibility**: Legacy system remains untouched
+6. **Performance**: Efficient single-canvas rendering with mathematical transforms

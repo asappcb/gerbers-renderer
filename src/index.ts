@@ -14,15 +14,23 @@ export { Viewer } from "./render-pipeline/viewer";
 export { RenderScheduler } from "./render-pipeline/core/renderScheduler";
 export { VisibilityManager } from "./render-pipeline/visibilityManager";
 export { createIntegratedViewer, type IntegratedViewerOptions } from "./render-pipeline/integratedViewer";
+
+// Overlay system
+export { OverlayRegistry } from "./render-pipeline/overlayRegistry";
+export { createOverlayPass } from "./render-pipeline/overlayPass";
 export { 
-  OverlayRegistry, 
+  createViolationDotsOverlay,
+  createTooltipOverlay,
+  createGridOverlay,
+  createPulsingMarkerOverlay
+} from "./render-pipeline/exampleOverlays";
+export type { OverlayApi, Overlay } from "./render-pipeline/core/renderContract";
+export { 
   MarkerRenderer, 
   SelectionRenderer,
   createGerberPass,
-  createOverlayPass,
   createMarkerPass,
   createSelectionPass,
-  type Overlay,
   type OverlayHelpers,
   type Marker,
   type Selection

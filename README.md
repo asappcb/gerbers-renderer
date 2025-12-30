@@ -15,8 +15,10 @@ Designed for:
 
 - 🧠 Gerber bundle detection (not just “try and fail”)
 - 📦 Supports `.zip` and `.rar` archives (browser-side)
-- 🎨 2D SVG-based board viewer
+- 🎨 Canvas-based board viewer with modern render pipeline
 - 🧩 Drop-in viewer that mounts into any DOM node
+- 🎯 Overlay system for custom visualizations
+- 📍 Built-in marker and selection systems
 - 🧪 Typed, deterministic render results
 - 🧼 No backend, no workers unless needed
 - ⚡ Vite, React, vanilla JS friendly
@@ -29,29 +31,9 @@ Designed for:
 npm install gerbers-renderer
 ```
 
-## Quick start (minimal)
+## Quick start
 
-### Legacy Viewer (DOM-based)
-```typescript
-import { createBoardViewer } from "gerbers-renderer";
-
-const viewer = createBoardViewer(document.getElementById("pcb")!);
-
-const file = input.files[0];
-const buffer = await file.arrayBuffer();
-
-const result = await renderGerbers(buffer, {
-  archiveWorkerUrl: "/libarchive-worker-bundle.js", // required for .rar
-});
-
-viewer.setData({
-  boardGeom: result.boardGeom,
-  layers: result.layers,
-});
-viewer.fit();
-```
-
-### Integrated Viewer (Canvas-based) - Recommended
+### Integrated Viewer (Canvas-based)
 ```typescript
 import { createIntegratedViewer } from "gerbers-renderer";
 
@@ -83,7 +65,7 @@ viewer.setSelection({
 });
 ```
 
-**Migration**: See [MIGRATION.md](./MIGRATION.md) for detailed upgrade guide.
+**Documentation**: See [MIGRATION.md](./MIGRATION.md) for detailed usage guide.
 
 Always call `result.revoke()` when replacing a render.
 
@@ -185,7 +167,7 @@ renderGerbersFiles(
 Create a drop-in board viewer:
 
 ```typescript
-const viewer = createBoardViewer(container, {
+const viewer = createIntegratedViewer(container, {
   onDownload: () => {
     /* optional */
   },
@@ -202,10 +184,13 @@ viewer.fit();
 
 The viewer supports:
 
-- Pan / zoom
-- Layer toggling
-- Top / bottom switching
+- Pan / zoom with mouse-centered zoom
+- Layer toggling (top/bottom switching)
+- Grid overlay with mm/in units
+- Custom overlays and markers
+- Selection regions
 - Download hook (original Gerbers)
+- Hardware-accelerated canvas rendering
 
 ## Return value
 
@@ -306,7 +291,113 @@ This enables:
 - Smooth pan/zoom operations
 - Mathematical foundation for extensions
 
+## Overlay System
+
+The integrated viewer includes a powerful overlay system for custom visualizations:
+
+### Adding Custom Overlays
+
+```typescript
+import { createViolationDotsOverlay, createGridOverlay } from "gerbers-renderer";
+
+// Add DFM violation dots (world space)
+viewer.addOverlayLayer({
+  id: "dfm:dots",
+  zIndex: 50,
+  visible: true,
+  drawInWorldSpace: true, // Draw in mm coordinates
+  draw: (ctx, api) => {
+    const violations = [
+      { x_mm: 10, y_mm: 12 },
+      { x_mm: 40, y_mm: 5 }
+    ];
+    
+    ctx.fillStyle = 'red';
+    for (const v of violations) {
+      ctx.beginPath();
+      ctx.arc(v.x_mm, v.y_mm, 0.25, 0, Math.PI * 2); // 0.25mm radius
+      ctx.fill();
+    }
+  }
+});
+
+// Add tooltip overlay (screen space)
+viewer.addOverlayLayer({
+  id: "ui:tooltip",
+  zIndex: 200,
+  visible: true,
+  drawInWorldSpace: false, // Draw in screen pixels
+  draw: (ctx, api) => {
+    const hover = getCurrentHover(); // Get hover state
+    if (!hover) return;
+    
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.fillRect(hover.x_px + 12, hover.y_px - 20, 100, 20);
+    ctx.fillStyle = 'white';
+    ctx.fillText(hover.text, hover.x_px + 15, hover.y_px - 5);
+  }
+});
+```
+
+### Overlay API
+
+Overlays receive a stable API object:
+
+```typescript
+type OverlayApi = {
+  // Coordinate conversion
+  boardToScreen: (p: { x_mm: number; y_mm: number }) => { x_px: number; y_px: number };
+  screenToBoard: (p: { x_px: number; y_px: number }) => { x_mm: number; y_mm: number };
+  
+  // View state
+  getViewState: () => { center_mm: { x: number; y: number }; zoom: number; rotation_rad: number };
+  getViewport: () => { width_px: number; height_px: number };
+  getBoardBounds: () => { minX_mm: number; minY_mm: number; maxX_mm: number; maxY_mm: number };
+  
+  // Render control
+  requestRender: (reason: string) => void;
+};
+```
+
+### Built-in Overlay Examples
+
+```typescript
+// Grid overlay
+viewer.addOverlayLayer(createGridOverlay(1)); // 1mm spacing
+
+// Violation dots
+viewer.addOverlayLayer(createViolationDotsOverlay());
+
+// Animated marker
+viewer.addOverlayLayer(createPulsingMarkerOverlay({ x_mm: 25, y_mm: 30 }));
+
+// Tooltip (provide hover state)
+viewer.addOverlayLayer(createTooltipOverlay(() => getCurrentHover()));
+```
+
+### Overlay Management
+
+```typescript
+// Control visibility
+viewer.setOverlayVisibility("dfm:dots", false);
+
+// Remove overlay
+viewer.removeOverlay("ui:tooltip");
+
+// Access registry directly
+const registry = viewer.getOverlayRegistry();
+registry.setZIndex("dfm:dots", 100); // Change render order
+```
+
+**Key Features:**
+- **Stable API**: Same object reference, current state access
+- **Explicit coordinate spaces**: World (mm) vs Screen (px) drawing
+- **Efficient rendering**: Sorted by zIndex, filtered by visibility
+- **Animation support**: Use `api.requestRender()` for smooth animations
+- **Lifecycle hooks**: `onAdd()` and `onRemove()` for setup/cleanup
+
 ### Render Pipeline
+
 ```typescript
 import { createIntegratedViewer } from "gerbers-renderer";
 
@@ -353,8 +444,10 @@ viewer.visibility.setMarkersVisibility(true);
 **File Organization:**
 - `src/render-pipeline/core/`: Core components (transforms, contracts, scheduling)
 - `src/render-pipeline/`: Complete render pipeline implementation
-- `src/viewer/`: Legacy DOM-based viewer (unchanged)
-- `src/index.ts`: Unified exports for both systems
+- `src/render-pipeline/overlayRegistry.ts`: Overlay management system
+- `src/render-pipeline/exampleOverlays.ts`: Built-in overlay examples
+- `src/viewer/`: Shared types and styles
+- `src/index.ts`: Unified exports
 
 See [FILE_STRUCTURE.md](./FILE_STRUCTURE.md) for detailed organization.
 

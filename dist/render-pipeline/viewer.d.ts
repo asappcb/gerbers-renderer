@@ -1,5 +1,6 @@
-import { RenderPass, VisibilityState } from './core/renderContract';
+import { RenderPass, VisibilityState, Overlay } from './core/renderContract';
 import { CameraState } from './core/viewportTransform';
+import { OverlayRegistry } from './overlayRegistry';
 export declare class Viewer {
     private canvas;
     private ctx;
@@ -8,6 +9,9 @@ export declare class Viewer {
     private passes;
     private scheduler;
     private visibilityGetter;
+    private overlays;
+    private overlayApi;
+    private boardBounds;
     constructor(canvas: HTMLCanvasElement, initialCamera: CameraState);
     setVisibilityGetter(getVisibility: () => VisibilityState): void;
     private setupResizeHandling;
@@ -23,6 +27,18 @@ export declare class Viewer {
     getVisibility(): VisibilityState;
     screenToBoard(screenX: number, screenY: number): import('..').Vec2;
     boardToScreen(boardX: number, boardY: number): import('..').Vec2;
+    setBoardBounds(bounds: {
+        minX_mm: number;
+        minY_mm: number;
+        maxX_mm: number;
+        maxY_mm: number;
+    }): void;
+    addOverlayLayer(overlay: Omit<Overlay, "id"> & {
+        id: string;
+    }): void;
+    removeOverlay(id: string): void;
+    setOverlayVisibility(id: string, visible: boolean): void;
+    getOverlayRegistry(): OverlayRegistry;
     getDebugInfo(): {
         passes: {
             id: string;

@@ -1,39 +1,20 @@
-# Migration Guide: From BoardViewer to Integrated Viewer
+# Integrated Viewer Guide
 
-This guide helps you migrate from the legacy DOM-based BoardViewer to the new canvas-based Integrated Viewer with the modern render pipeline.
+This guide covers the modern canvas-based Integrated Viewer with the render pipeline system.
 
-## Quick Comparison
+## Features Overview
 
-| Feature | Legacy BoardViewer | Integrated Viewer |
-|---------|------------------|------------------|
-| **Rendering** | DOM `<img>` elements + CSS transforms | Canvas with render passes |
-| **Performance** | Multiple DOM elements, limited | Single canvas, hardware accelerated |
-| **Coordinates** | CSS transform matrix | Mathematical ViewportTransform |
-| **Extensibility** | Limited DOM manipulation | Flexible render pass system |
-| **Overlays** | Separate canvas for grid | Integrated overlay system |
-| **Markers** | Not supported | Built-in marker system |
-| **Selection** | Not supported | Built-in selection system |
+| Feature | Integrated Viewer |
+|---------|------------------|
+| **Rendering** | Canvas with render passes |
+| **Performance** | Single canvas, hardware accelerated |
+| **Coordinates** | Mathematical ViewportTransform |
+| **Extensibility** | Flexible render pass system |
+| **Overlays** | Integrated overlay system |
+| **Markers** | Built-in marker system |
+| **Selection** | Built-in selection system |
 
-## Basic Migration
-
-### Before (Legacy)
-```typescript
-import { createBoardViewer } from "gerbers-renderer";
-
-const viewer = createBoardViewer(container, {
-  onDownload: () => console.log("download")
-});
-
-viewer.setData({
-  boardGeom: result.boardGeom,
-  layers: result.layers
-});
-
-viewer.setSideMode("top");
-viewer.fit();
-```
-
-### After (Integrated)
+## Basic Usage
 ```typescript
 import { createIntegratedViewer } from "gerbers-renderer";
 
@@ -49,7 +30,7 @@ viewer.setData({
 viewer.setSideMode("top");
 viewer.fit();
 
-// New features available:
+// Additional features:
 viewer.addMarker({
   id: "test-point",
   position: { x: 10, y: 5 }, // Board coordinates (mm)
@@ -135,12 +116,12 @@ viewer.visibility.subscribe((state) => {
 });
 ```
 
-## API Differences
-
-### Removed Methods
-- `dispose()` - Still available, but you should also clean up render resources
-
-### New Methods
+## API Reference
+### Available Methods
+- `setData(data)` - Set board geometry and layers
+- `setSideMode(mode)` - Switch between top/bottom views
+- `fit()` - Fit board to viewport
+- `dispose()` - Clean up resources
 - `viewer.viewer` - Access to underlying Viewer instance
 - `viewer.visibility` - VisibilityManager instance
 - `viewer.overlayRegistry` - OverlayRegistry instance  
@@ -149,8 +130,8 @@ viewer.visibility.subscribe((state) => {
 - `addMarker(marker)` - Add a marker
 - `removeMarker(id)` - Remove a marker
 
-### Event Handling
-The integrated viewer uses the same UI events (wheel, mousedown, etc.) but they now work with the mathematical transform system instead of CSS transforms.
+## Event Handling
+The viewer handles mouse events for pan/zoom and provides programmatic camera control.
 
 ## Performance Benefits
 
@@ -160,34 +141,27 @@ The integrated viewer uses the same UI events (wheel, mousedown, etc.) but they 
 4. **Coordinate Consistency**: All elements use the same coordinate system
 5. **Memory Efficient**: No DOM overhead for layers and overlays
 
-## Backward Compatibility
-
-The legacy `createBoardViewer` is still available and unchanged. You can:
-- Keep using the existing viewer
-- Migrate gradually by testing the integrated viewer
-- Use both viewers in the same application
-
 ## Coordinate System
 
-The integrated viewer uses a precise coordinate system:
+The viewer uses a precise coordinate system:
 - **Board space**: millimeters, x right, y down (top-left origin)
 - **Screen space**: pixels, x right, y down (canvas default)
 - **Transform**: `ViewportTransform` with matrix operations
 
-This differs from the legacy viewer's CSS transform approach but provides:
+This provides:
 - Better precision for zoom/pan operations
 - Consistent coordinate handling across all features
 - Mathematical foundation for extensions
 
-**Note**: Both board and screen coordinates now use top-left origin (y down), which eliminates the need for Y-axis flipping and provides more intuitive coordinate handling.
+**Note**: Both board and screen coordinates use top-left origin (y down), which eliminates the need for Y-axis flipping and provides more intuitive coordinate handling.
 
-## Testing the Migration
+## Getting Started
 
-1. **Basic functionality**: Load your existing Gerber files
+1. **Basic functionality**: Load your Gerber files
 2. **Pan/zoom**: Test mouse wheel and drag interactions  
 3. **Layer toggling**: Verify side mode switching works
 4. **Grid overlay**: Test grid display and units
-5. **Performance**: Compare rendering performance with complex boards
+5. **Performance**: Check rendering performance with complex boards
 
 ## Troubleshooting
 
@@ -212,9 +186,9 @@ If rendering is slow:
 
 ## Next Steps
 
-1. **Test with your data**: Try the integrated viewer with your Gerber files
+1. **Load your data**: Try the viewer with your Gerber files
 2. **Explore features**: Experiment with markers, selections, and custom overlays
 3. **Customize passes**: Add render passes specific to your use case
 4. **Performance tune**: Optimize for your typical board sizes and complexity
 
-The integrated viewer provides a foundation for advanced features while maintaining the familiar interface of the original BoardViewer.
+The integrated viewer provides a modern, high-performance foundation for PCB visualization with extensive customization options.
