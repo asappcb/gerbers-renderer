@@ -138,12 +138,46 @@ export class ViewportTransform {
     return this.screenToWorldMat;
   }
 
-  boardToScreen(p_mm: Vec2): Vec2 {
-    return matApply(this.worldToScreenMat, p_mm);
+  boardToScreen(p_mm: Vec2 | { x_mm?: number; y_mm?: number } | [number, number]): Vec2 {
+    try {
+      let point: Vec2;
+      
+      // Handle different input formats
+      if (Array.isArray(p_mm)) {
+        point = { x: p_mm[0], y: p_mm[1] };
+      } else if ('x' in p_mm) {
+        point = { x: p_mm.x, y: p_mm.y };
+      } else if ('x_mm' in p_mm) {
+        point = { x: p_mm.x_mm ?? 0, y: p_mm.y_mm ?? 0 };
+      } else {
+        return { x: NaN, y: NaN };
+      }
+      
+      return matApply(this.worldToScreenMat, point);
+    } catch (error) {
+      return { x: NaN, y: NaN };
+    }
   }
 
-  screenToBoard(p_px: Vec2): Vec2 {
-    return matApply(this.screenToWorldMat, p_px);
+  screenToBoard(p_px: Vec2 | { x_px?: number; y_px?: number } | [number, number]): Vec2 {
+    try {
+      let point: Vec2;
+      
+      // Handle different input formats
+      if (Array.isArray(p_px)) {
+        point = { x: p_px[0], y: p_px[1] };
+      } else if ('x' in p_px) {
+        point = { x: p_px.x, y: p_px.y };
+      } else if ('x_px' in p_px) {
+        point = { x: p_px.x_px ?? 0, y: p_px.y_px ?? 0 };
+      } else {
+        return { x: NaN, y: NaN };
+      }
+      
+      return matApply(this.screenToWorldMat, point);
+    } catch (error) {
+      return { x: NaN, y: NaN };
+    }
   }
 
   private recompute() {

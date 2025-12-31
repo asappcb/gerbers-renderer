@@ -55,9 +55,10 @@ export class Viewer {
     if (!ctx) throw new Error('Unable to get 2D context');
     this.ctx = ctx;
 
+    const rect = canvas.getBoundingClientRect();
     const viewport: Viewport = {
-      width_px: canvas.width,
-      height_px: canvas.height
+      width_px: rect.width,
+      height_px: rect.height
     };
 
     this.xform = new ViewportTransform(initialCamera, viewport);
@@ -133,8 +134,9 @@ export class Viewer {
     const ctx = this.ctx;
     const canvas = this.canvas;
 
-    // Ensure viewport matches canvas
-    const viewport = { width_px: canvas.width, height_px: canvas.height };
+    // Ensure viewport matches canvas CSS size
+    const rect = canvas.getBoundingClientRect();
+    const viewport = { width_px: rect.width, height_px: rect.height };
 
     // Update transform viewport if needed
     this.xform.setViewport(viewport);
@@ -154,9 +156,13 @@ export class Viewer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Scale for device pixel ratio for crisp rendering
+    const dpr = window.devicePixelRatio || 1;
+    ctx.scale(dpr, dpr);
+
     // Optional: fill background
     ctx.fillStyle = '#f5f5f5';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
 
     // Execute all passes in order
     for (const pass of this.passes) {

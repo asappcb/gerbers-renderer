@@ -488,6 +488,68 @@ if (hit) {
 viewer.selectMarker(null);
 ```
 
+### Viewer Navigation
+
+The viewer provides several methods to navigate to specific locations on the board:
+
+**For direct Viewer usage:**
+```typescript
+// Direct camera control - go to specific board coordinates (in mm)
+viewer.setCamera({
+  center_mm: { x: 50, y: 75 },  // Board coordinates in millimeters
+  zoom: 10                       // Pixels per mm (zoom level)
+});
+
+// Get current camera state
+const currentCamera = viewer.getCamera();
+console.log('Current center:', currentCamera.center_mm);
+console.log('Current zoom:', currentCamera.zoom);
+
+// Coordinate conversion utilities
+const screenPos = viewer.boardToScreen(50, 75);  // mm → px
+const boardPos = viewer.screenToBoard(250, 300);  // px → mm
+```
+
+**For Integrated Viewer usage:**
+```typescript
+// When using createIntegratedViewer(), access the underlying viewer
+const integratedViewer = createIntegratedViewer(hostElement);
+
+// Navigate using the underlying viewer property
+integratedViewer.viewer.setCamera({
+  center_mm: { x: 50, y: 75 },
+  zoom: 10
+});
+
+// Get current camera state
+const currentCamera = integratedViewer.viewer.getCamera();
+
+// Coordinate conversion utilities
+const screenPos = integratedViewer.viewer.boardToScreen(50, 75);
+const boardPos = integratedViewer.viewer.screenToBoard(250, 300);
+
+// Navigate to a marker location
+integratedViewer.addMarker({
+  id: 'target-location',
+  x_mm: 50,
+  y_mm: 75,
+  radius_mm: 2,
+  color: '#ff0000'
+});
+
+// Note: selectMarker is on the integrated viewer, not the base viewer
+integratedViewer.viewer.selectMarker('target-location', { 
+  center: true, 
+  animate: true 
+});
+```
+
+**Camera State Properties:**
+- `center_mm`: Board center point in millimeters
+- `zoom`: Pixels per millimeter (zoom level)  
+- `rotation_rad`: Rotation in radians (optional)
+- `mirrorX/mirrorY`: Flip axes (optional)
+
 ### Marker Styling
 
 Markers are automatically styled by severity:

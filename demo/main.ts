@@ -11,6 +11,9 @@ let lastRevoke: (() => void) | null = null;
 let lastFile: File | null = null;
 let lastArchiveType: "zip" | "rar" | null = null;
 
+// Make viewer globally accessible for debugging
+(window as any).viewer = viewer;
+
 const inputEl = document.getElementById("file-input") as HTMLInputElement | null;
 const statusEl = document.getElementById("status") as HTMLSpanElement | null;
 const host = document.getElementById("pcb-host") as HTMLDivElement | null;
@@ -51,6 +54,9 @@ function ensureViewer() {
       URL.revokeObjectURL(url);
     },
   });
+
+  // Update global reference
+  (window as any).viewer = viewer;
 
   return viewer;
 }

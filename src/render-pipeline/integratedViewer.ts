@@ -1,6 +1,6 @@
 import "../viewer/viewer.css";
 import type { BoardGeom, ViewerLayers, ViewerSideMode } from '../viewer/types';
-import type { RenderCtx } from './core/renderContract';
+import type { RenderCtx, OverlayApi } from './core/renderContract';
 import { Viewer } from './viewer';
 import { VisibilityManager } from './visibilityManager';
 import { 
@@ -125,7 +125,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     visible: false,
     zIndex: 10,
     draw: (ctx: CanvasRenderingContext2D, helpers: OverlayHelpers) => {
-      const { xform, view } = helpers;
+      const view = helpers.view;
       const zoom = view.zoom;
       const units = gridUnits.value;
       
@@ -141,11 +141,10 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
       if (minorScreen < 2) return; // Reduced from 6 to 2
       
       // Get viewport bounds in board coordinates
+      const cssW = canvas.width / (window.devicePixelRatio || 1);
+      const cssH = canvas.height / (window.devicePixelRatio || 1);
       const topLeft = helpers.screenToBoard({ x: 0, y: 0 });
-      const bottomRight = helpers.screenToBoard({ 
-        x: canvas.width / (window.devicePixelRatio || 1), 
-        y: canvas.height / (window.devicePixelRatio || 1) 
-      });
+      const bottomRight = helpers.screenToBoard({ x: cssW, y: cssH });
       
       // Draw in screen space for crisp lines
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -439,7 +438,9 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   window.addEventListener("mouseup", onUp);
 
   gridToggle.addEventListener("change", () => {
-    visibility.setOverlayVisibility("grid", gridToggle.checked);
+    const v = gridToggle.checked;
+    visibility.setOverlayVisibility("grid", v);
+    gridOverlay.visible = v;
     viewer.requestRender("grid-toggle");
   });
 
@@ -474,6 +475,13 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   function setData(data: { boardGeom: BoardGeom; layers: ViewerLayers }) {
     boardGeom = data.boardGeom;
     layers = data.layers;
+    
+    // Set board bounds for proper coordinate system
+    if (boardGeom?.board) {
+      const w_mm = (boardGeom.board.width_in || 1) * 25.4;
+      const h_mm = (boardGeom.board.height_in || 1) * 25.4;
+      viewer.setBoardBounds({ minX_mm: 0, minY_mm: 0, maxX_mm: w_mm, maxY_mm: h_mm });
+    }
     
     updateRenderPasses();
     resizeCanvas();

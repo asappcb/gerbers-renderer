@@ -26,7 +26,13 @@ export declare class ViewportTransform {
     getViewport(): Viewport;
     getWorldToScreenMatrix(): Mat3;
     getScreenToWorldMatrix(): Mat3;
-    boardToScreen(p_mm: Vec2): Vec2;
-    screenToBoard(p_px: Vec2): Vec2;
+    boardToScreen(p_mm: Vec2 | {
+        x_mm?: number;
+        y_mm?: number;
+    } | [number, number]): Vec2;
+    screenToBoard(p_px: Vec2 | {
+        x_px?: number;
+        y_px?: number;
+    } | [number, number]): Vec2;
     private recompute;
 }
