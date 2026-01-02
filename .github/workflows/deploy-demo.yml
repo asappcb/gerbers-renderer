@@ -43,9 +43,8 @@ jobs:
       run: |
         # Copy built library to demo dist
         cp -r dist dist-demo/
-        # Create public directory and copy libarchive worker for rar support
-        mkdir -p dist-demo/public
-        cp node_modules/libarchive.js/dist/worker-bundle.js dist-demo/public/
+        # Copy libarchive worker for rar support to root
+        cp node_modules/libarchive.js/dist/worker-bundle.js dist-demo/
 
     - name: Setup Pages
       uses: actions/configure-pages@v4
