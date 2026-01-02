@@ -23,6 +23,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:demo": "vite build --config vite.demo.config.ts --mode production",
     "preview": "vite preview",
     "test": "vitest"
   },

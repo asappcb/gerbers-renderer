@@ -14,4 +14,6 @@ export default defineConfig({
     },
     sourcemap: true,
   },
+  // Base path for GitHub Pages
+  base: process.env.NODE_ENV === 'production' ? '/gerbers-renderer/' : '/',
 });

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>gerbers-renderer demo</title>
+
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+        background: #111827;
+        color: #e5e7eb;
+      }
+
+      body {
+        display: flex;
+        flex-direction: column;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 10px 16px;
+        background: #020617;
+        border-bottom: 1px solid #1f2933;
+      }
+
+      header h1 {
+        font-size: 14px;
+        margin: 0;
+        font-weight: 600;
+      }
+
+      #status {
+        font-size: 12px;
+        color: #9ca3af;
+      }
+
+      #app {
+        flex: 1;
+        display: flex;
+        min-height: 0;
+      }
+
+      #left {
+        width: 260px;
+        padding: 16px;
+        box-sizing: border-box;
+        border-right: 1px solid #1f2933;
+        background: #020617;
+      }
+
+      #left p {
+        font-size: 12px;
+        color: #9ca3af;
+        margin-top: 12px;
+        line-height: 1.4;
+      }
+
+      #right {
+        flex: 1;
+        position: relative;
+        background: #0b1220;
+      }
+
+      #pcb-host {
+        position: absolute;
+        inset: 0;
+      }
+
+      input[type="file"] {
+        width: 100%;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <header>
+      <h1>gerbers-renderer</h1>
+      <span id="status">No file loaded</span>
+    </header>
+
+    <div id="app">
+      <div id="left">
+        <label for="file-input" style="font-size:12px;">Choose a <code>gerbers.zip</code> or <code>gerbers.rar</code></label>
+        <input id="file-input" type="file" accept=".zip,.rar" />
+
+        <p>
+          Upload a PCB Gerbers ZIP or RAR. Rendering is frontend-only.
+          Scroll to zoom, drag to pan.
+        </p>
+      </div>
+
+      <div id="right">
+        <div id="pcb-host"></div>
+      </div>
+    </div>
+
+    <script type="module" src="./assets/index-DfEIVGg1.js"></script>
+  </body>
+</html>
