@@ -27,6 +27,7 @@ Designed for:
 - ⚡ Vite, React, vanilla JS friendly
 - 🎯 Precise viewport transforms with camera controls
 - 📐 Coordinate system: Board (mm) ↔ Screen (px) conversion
+- 🔧 Configurable download button visibility for viewer UI
 
 ## Installation
 
@@ -81,6 +82,8 @@ Always call `result.revoke()` when replacing a render.
 
 ## Live demo
 
+### Local Development
+
 ```bash
 git clone https://github.com/asappcb/gerbers-renderer
 npm install
@@ -90,7 +93,29 @@ npm run dev
 Open:
 👉 http://localhost:5173/demo/
 
-**The demo now showcases the new integrated viewer** with:
+### GitHub Pages Deployment
+
+The demo is automatically deployed to GitHub Pages when pushing to the `main` branch.
+
+**Live Demo**: https://asappcb.github.io/gerbers-renderer/
+
+**Manual Build for GitHub Pages**:
+
+```bash
+# Build library and demo
+npm run build
+npm run build:demo
+
+# The demo will be in dist-demo/ directory
+# Ready for GitHub Pages deployment
+```
+
+**GitHub Actions Setup**:
+- Automatic deployment is configured in `.github/workflows/deploy-demo.yml`
+- Deploys when changes are made to: `demo/**`, `src/**`, `package.json`, `vite.config.ts`
+- GitHub Pages must be configured to use "GitHub Actions" as source
+
+**The demo showcases the new integrated viewer** with:
 - Canvas-based rendering with hardware acceleration
 - Grid overlay with mm/in units
 - Precise viewport transforms and smooth pan/zoom
@@ -181,6 +206,7 @@ const viewer = createIntegratedViewer(container, {
   onDownload: () => {
     /* optional */
   },
+  showDownloadButton: true, // Optional: control download button visibility (defaults to true)
 });
 
 viewer.setData({
@@ -201,6 +227,44 @@ The viewer supports:
 - Selection regions
 - Download hook (original Gerbers)
 - Hardware-accelerated canvas rendering
+- **Configurable download button visibility**
+
+### Download Button Control
+
+The integrated viewer allows you to control the visibility of the download button in the header:
+
+```typescript
+// Default behavior (download button visible)
+const viewer = createIntegratedViewer(container, {
+  onDownload: () => {
+    // Handle download logic
+    console.log('Download clicked');
+  }
+  // showDownloadButton defaults to true
+});
+
+// Explicitly show download button
+const viewer = createIntegratedViewer(container, {
+  onDownload: () => {
+    // Handle download logic
+  },
+  showDownloadButton: true
+});
+
+// Hide download button
+const viewer = createIntegratedViewer(container, {
+  onDownload: () => {
+    // This callback won't be called since the button is hidden
+  },
+  showDownloadButton: false
+});
+```
+
+**Use Cases:**
+- **Read-only viewers**: Hide download when users shouldn't access original files
+- **Embedded components**: Remove download for cleaner UI in dashboards
+- **Permission-based UI**: Toggle based on user access rights
+- **Mobile apps**: Hide to save screen space on small devices
 
 ## Return value
 

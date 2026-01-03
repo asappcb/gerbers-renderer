@@ -18,6 +18,7 @@ import {
 
 export type IntegratedViewerOptions = {
   onDownload?: () => void;
+  showDownloadButton?: boolean;
 };
 
 export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewerOptions = {}) {
@@ -28,6 +29,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   <path d="M4 17v3h16v-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
 </svg>
 `;
+
+  const showDownloadButton = opts.showDownloadButton !== false; // Default to true
 
   host.innerHTML = `
     <div class="board-viewer-root">
@@ -60,11 +63,11 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
               </select>
             </div>
 
-            <button class="btn" id="fit-btn" type="button" title="Fit to viewport">Fit</button>
+            <button class="btn" id="fit-btn" type="button" title="Fit to viewport">Fit</button>${showDownloadButton ? `
             <button class="btn btn-primary" id="download-btn" type="button" title="Download">
               ${downloadIcon}
               Download
-            </button>
+            </button>` : ''}
           </div>
         </div>
       </div>
@@ -84,7 +87,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   const gridToggle = mustGet<HTMLInputElement>(root, "#grid-toggle");
   const gridUnits = mustGet<HTMLSelectElement>(root, "#grid-units");
   const fitBtn = mustGet<HTMLButtonElement>(root, "#fit-btn");
-  const downloadBtn = mustGet<HTMLButtonElement>(root, "#download-btn");
+  const downloadBtn = showDownloadButton ? mustGet<HTMLButtonElement>(root, "#download-btn") : null;
   const radios = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="side"]'));
 
   // Initialize render pipeline
@@ -452,7 +455,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   });
 
   fitBtn.addEventListener("click", () => fitBoardToViewport(0.08));
-  downloadBtn.addEventListener("click", () => opts.onDownload?.());
+  downloadBtn?.addEventListener("click", () => opts.onDownload?.());
 
   radios.forEach((r) => {
     r.addEventListener("change", () => {

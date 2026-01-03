@@ -4,6 +4,7 @@ import { VisibilityManager } from './visibilityManager';
 import { OverlayRegistry, MarkerRenderer, Marker, Selection } from './renderPasses';
 export type IntegratedViewerOptions = {
     onDownload?: () => void;
+    showDownloadButton?: boolean;
 };
 export declare function createIntegratedViewer(host: HTMLElement, opts?: IntegratedViewerOptions): {
     setData: (data: {

@@ -17,6 +17,7 @@ let lastArchiveType: "zip" | "rar" | null = null;
 const inputEl = document.getElementById("file-input") as HTMLInputElement | null;
 const statusEl = document.getElementById("status") as HTMLSpanElement | null;
 const host = document.getElementById("pcb-host") as HTMLDivElement | null;
+const downloadToggle = document.getElementById("download-toggle") as HTMLInputElement | null;
 
 function setStatus(msg: string) {
   if (statusEl) statusEl.textContent = msg;
@@ -53,6 +54,7 @@ function ensureViewer() {
 
       URL.revokeObjectURL(url);
     },
+    showDownloadButton: downloadToggle?.checked ?? true,
   });
 
   // Update global reference
@@ -60,6 +62,14 @@ function ensureViewer() {
 
   return viewer;
 }
+
+// Handle download toggle changes
+downloadToggle?.addEventListener("change", () => {
+  if (viewer) {
+    viewer.dispose();
+    viewer = null;
+  }
+});
 
 if (!inputEl || !statusEl || !host) {
   throw new Error(
