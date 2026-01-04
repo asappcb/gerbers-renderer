@@ -234,9 +234,9 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     return {
       id,
       order,
-      enabled: () => true,
+      enabled: (rc: RenderCtx) => !!boardGeom?.board?.mm_bounds,
       draw: (rc: RenderCtx) => {
-        if (!img.complete) return;
+        if (!img.complete || !boardGeom?.board?.mm_bounds) return;
         
         const ctx = rc.ctx;
         const m = rc.xform.getWorldToScreenMatrix();
@@ -244,14 +244,12 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
         // Set transform to draw in board coordinates
         ctx.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
         
-        // Draw image at board coordinates (convert from pixels to mm)
-        const PX_PER_IN = 1000;
-        const MM_PER_IN = 25.4;
+        // Draw image at true board coordinates using bounds
+        const bounds = boardGeom.board.mm_bounds;
+        const boardWidth = bounds.max_x_mm - bounds.min_x_mm;
+        const boardHeight = bounds.max_y_mm - bounds.min_y_mm;
         
-        const boardWidth = (boardGeom?.board?.width_in || 1) * MM_PER_IN; // mm
-        const boardHeight = (boardGeom?.board?.height_in || 1) * MM_PER_IN; // mm
-        
-        ctx.drawImage(img, 0, 0, boardWidth, boardHeight);
+        ctx.drawImage(img, bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
       },
     };
   }
@@ -260,9 +258,9 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     return {
       id,
       order,
-      enabled: () => true,
+      enabled: (rc: RenderCtx) => !!boardGeom?.board?.mm_bounds,
       draw: (rc: RenderCtx) => {
-        if (!boardGeom?.board) return;
+        if (!boardGeom?.board?.mm_bounds) return;
         
         const ctx = rc.ctx;
         const m = rc.xform.getWorldToScreenMatrix();
@@ -270,17 +268,18 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
         // Set transform to draw in board coordinates
         ctx.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
         
-        // Draw green FR4 background
-        const boardWidth = (boardGeom.board.width_in || 1) * 25.4; // mm
-        const boardHeight = (boardGeom.board.height_in || 1) * 25.4; // mm
+        // Draw green FR4 background using true bounds
+        const bounds = boardGeom.board.mm_bounds;
+        const boardWidth = bounds.max_x_mm - bounds.min_x_mm;
+        const boardHeight = bounds.max_y_mm - bounds.min_y_mm;
         
         ctx.fillStyle = '#1a5f1a'; // Dark green PCB color
-        ctx.fillRect(0, 0, boardWidth, boardHeight);
+        ctx.fillRect(bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
         
         // Add subtle border
         ctx.strokeStyle = '#0d3d0d';
         ctx.lineWidth = 0.1; // mm
-        ctx.strokeRect(0, 0, boardWidth, boardHeight);
+        ctx.strokeRect(bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
       },
     };
   }
@@ -328,27 +327,26 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   }
 
   function fitBoardToViewport(marginFrac = 0.08) {
-    if (!boardGeom?.board) return;
+    if (!boardGeom?.board?.mm_bounds) return;
     
     const rect = viewport.getBoundingClientRect();
-    const boardWidthIn = boardGeom.board.width_in || 1;
-    const boardHeightIn = boardGeom.board.height_in || 1;
+    const bounds = boardGeom.board.mm_bounds;
+    
+    // Calculate actual board dimensions from true bounds
+    const boardWidthMm = bounds.max_x_mm - bounds.min_x_mm;
+    const boardHeightMm = bounds.max_y_mm - bounds.min_y_mm;
     
     const usableWidth = rect.width * (1 - 2 * marginFrac);
     const usableHeight = rect.height * (1 - 2 * marginFrac);
-    
-    // Convert board dimensions to mm
-    const boardWidthMm = boardWidthIn * 25.4;
-    const boardHeightMm = boardHeightIn * 25.4;
     
     // Calculate zoom to fit board in viewport (pixels per mm)
     const zoomX = usableWidth / boardWidthMm;
     const zoomY = usableHeight / boardHeightMm;
     const zoom = Math.min(zoomX, zoomY);
     
-    // Center the board (board coordinates are in mm, origin at top-left)
-    const boardCenterX = boardWidthMm / 2;
-    const boardCenterY = boardHeightMm / 2;
+    // Center the board using the actual bounds center
+    const boardCenterX = (bounds.min_x_mm + bounds.max_x_mm) / 2;
+    const boardCenterY = (bounds.min_y_mm + bounds.max_y_mm) / 2;
     
     viewer.setCamera({
       center_mm: { x: boardCenterX, y: boardCenterY },
@@ -479,11 +477,14 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     boardGeom = data.boardGeom;
     layers = data.layers;
     
-    // Set board bounds for proper coordinate system
-    if (boardGeom?.board) {
-      const w_mm = (boardGeom.board.width_in || 1) * 25.4;
-      const h_mm = (boardGeom.board.height_in || 1) * 25.4;
-      viewer.setBoardBounds({ minX_mm: 0, minY_mm: 0, maxX_mm: w_mm, maxY_mm: h_mm });
+    // Set board bounds for proper coordinate system using true Gerber-space bounds
+    if (boardGeom?.board?.mm_bounds) {
+      viewer.setBoardBounds({
+        minX_mm: boardGeom.board.mm_bounds.min_x_mm,
+        minY_mm: boardGeom.board.mm_bounds.min_y_mm,
+        maxX_mm: boardGeom.board.mm_bounds.max_x_mm,
+        maxY_mm: boardGeom.board.mm_bounds.max_y_mm,
+      });
     }
     
     updateRenderPasses();

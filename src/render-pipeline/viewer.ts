@@ -148,6 +148,7 @@ export class Viewer {
       xform: this.xform,
       now_ms: performance.now(),
       visibility: this.visibility.getState(), // Use visibility manager
+      boardBounds: this.boardBounds,
       boardToScreen: (p) => this.xform.boardToScreen({ x: p.x, y: p.y }),
       screenToBoard: (p) => this.xform.screenToBoard({ x: p.x, y: p.y }),
     };
@@ -285,6 +286,7 @@ export class Viewer {
       xform: this.xform,
       now_ms: performance.now(),
       visibility: this.visibility.getState(),
+      boardBounds: this.boardBounds,
       boardToScreen: (p: { x: number; y: number }) => this.xform.boardToScreen({ x: p.x, y: p.y }),
       screenToBoard: (p: { x: number; y: number }) => this.xform.screenToBoard({ x: p.x, y: p.y }),
     };

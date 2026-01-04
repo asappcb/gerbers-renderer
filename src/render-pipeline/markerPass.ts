@@ -16,9 +16,11 @@ export function createMarkerPass(
       if (!rc.visibility.markers) return; // Early exit if markers are disabled
       
       const state = getMarkerState();
+      
       renderer.draw(rc, {
         selectedId: state.selectedId,
         hoverId: state.hoverId,
+        boardBounds: rc.boardBounds,
       });
     },
   };

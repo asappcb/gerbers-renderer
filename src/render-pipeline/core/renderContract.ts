@@ -55,6 +55,7 @@ export type RenderCtx = {
   xform: ViewportTransform;
   now_ms: number;
   visibility: VisibilityState;
+  boardBounds: { minX_mm: number; minY_mm: number; maxX_mm: number; maxY_mm: number };
   boardToScreen: (p: Vec2) => Vec2;
   screenToBoard: (p: Vec2) => Vec2;
 };

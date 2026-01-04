@@ -4,7 +4,7 @@ import {
   renderGerbers,
   detectGerberBundle,
   GerberError,
-} from "../src";
+} from "../src/index";
 
 let viewer: ReturnType<typeof createIntegratedViewer> | null = null;
 let lastRevoke: (() => void) | null = null;

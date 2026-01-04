@@ -1,10 +1,11 @@
 import { RenderCtx } from './core/renderContract';
 import { MarkerStore } from './markerStore';
+import { BoardBounds, isPointOffBoard } from './dfmCoordinateAdapter';
 
 export class MarkerRenderer {
   constructor(private store: MarkerStore) {}
 
-  draw(rc: RenderCtx, opts?: { selectedId?: string | null; hoverId?: string | null }) {
+  draw(rc: RenderCtx, opts?: { selectedId?: string | null; hoverId?: string | null; boardBounds?: BoardBounds }) {
     const markers = this.store.list();
 
     // draw in screen space
@@ -23,8 +24,12 @@ export class MarkerRenderer {
       // cheap cull (with padding)
       if (x < -10 || y < -10 || x > width_px + 10 || y > height_px + 10) continue;
 
-      // Set default styling based on severity
-      this.applyMarkerStyling(rc.ctx, m, opts?.selectedId === m.id, opts?.hoverId === m.id);
+      // Check if marker is off-board (if bounds are provided)
+      const isOffBoard = opts?.boardBounds ? 
+        isPointOffBoard({ x_mm: m.x_mm, y_mm: m.y_mm }, opts.boardBounds) : false;
+
+      // Set default styling based on severity and off-board status
+      this.applyMarkerStyling(rc.ctx, m, opts?.selectedId === m.id, opts?.hoverId === m.id, isOffBoard);
 
       rc.ctx.beginPath();
       rc.ctx.arc(x, y, r_px, 0, Math.PI * 2);
@@ -39,7 +44,7 @@ export class MarkerRenderer {
     }
   }
 
-  private applyMarkerStyling(ctx: CanvasRenderingContext2D, marker: any, isSelected: boolean, isHovered: boolean) {
+  private applyMarkerStyling(ctx: CanvasRenderingContext2D, marker: any, isSelected: boolean, isHovered: boolean, isOffBoard: boolean) {
     // Default neutral styling - can be overridden with theme system
     if (isSelected) {
       ctx.fillStyle = 'rgba(59, 130, 246, 0.8)'; // Blue for selected
@@ -47,6 +52,11 @@ export class MarkerRenderer {
     } else if (isHovered) {
       ctx.fillStyle = 'rgba(245, 158, 11, 0.8)'; // Orange for hover
       ctx.strokeStyle = 'rgba(245, 158, 11, 1)';
+    } else if (isOffBoard) {
+      // Dimmed styling for off-board markers
+      ctx.fillStyle = 'rgba(107, 114, 128, 0.4)'; // Gray with low opacity
+      ctx.strokeStyle = 'rgba(107, 114, 128, 0.6)';
+      ctx.setLineDash([2, 2]); // Dashed line for off-board
     } else {
       // Style by severity
       switch (marker.severity) {
@@ -63,6 +73,7 @@ export class MarkerRenderer {
           ctx.fillStyle = 'rgba(107, 114, 128, 0.8)'; // Gray
           break;
       }
+      ctx.setLineDash([]); // Solid line for on-board markers
     }
   }
 }

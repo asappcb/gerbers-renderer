@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { ViewportTransform, CameraState, Viewport, Vec2 } from "./viewportTransform";
+import { dfmToBoardCoordinates, adaptDfmPoint, isPointOffBoard, BoardBounds } from "../dfmCoordinateAdapter";
 
 function approx(a: number, b: number, eps = 1e-6) {
   expect(Math.abs(a - b)).toBeLessThanOrEqual(eps);
@@ -108,5 +109,68 @@ describe("ViewportTransform", () => {
     const viewport = t.getViewport();
     expect(viewport.width_px).toBe(800);
     expect(viewport.height_px).toBe(600);
+  });
+});
+
+describe("DFM Coordinate Adapter", () => {
+  // Example bounds with non-zero min and negative min to catch bugs
+  const testBounds: BoardBounds = {
+    minX_mm: 10,
+    maxX_mm: 120,
+    minY_mm: -5,
+    maxY_mm: 14
+  };
+
+  it("maps (minX, maxY) to (0, 0) after adapter", () => {
+    const dfmPoint = { x_mm: testBounds.minX_mm, y_mm: testBounds.maxY_mm };
+    const boardPoint = dfmToBoardCoordinates(dfmPoint, testBounds);
+    
+    approx(boardPoint.x_mm, 0);
+    approx(boardPoint.y_mm, 0);
+  });
+
+  it("maps (minX, minY) to (0, height) after adapter", () => {
+    const dfmPoint = { x_mm: testBounds.minX_mm, y_mm: testBounds.minY_mm };
+    const boardPoint = dfmToBoardCoordinates(dfmPoint, testBounds);
+    
+    const expectedHeight = testBounds.maxY_mm - testBounds.minY_mm;
+    approx(boardPoint.x_mm, 0);
+    approx(boardPoint.y_mm, expectedHeight);
+  });
+
+  it("maps (maxX, maxY) to (width, 0) after adapter", () => {
+    const dfmPoint = { x_mm: testBounds.maxX_mm, y_mm: testBounds.maxY_mm };
+    const boardPoint = dfmToBoardCoordinates(dfmPoint, testBounds);
+    
+    const expectedWidth = testBounds.maxX_mm - testBounds.minX_mm;
+    approx(boardPoint.x_mm, expectedWidth);
+    approx(boardPoint.y_mm, 0);
+  });
+
+  it("random point roundtrip sanity: adapter output stays consistent with expected width/height", () => {
+    // Test several random points
+    const testPoints = [
+      { x_mm: 25, y_mm: 8 },
+      { x_mm: 50, y_mm: -2 },
+      { x_mm: 100, y_mm: 12 },
+      { x_mm: 15, y_mm: 0 }
+    ];
+
+    const boardWidth = testBounds.maxX_mm - testBounds.minX_mm;
+    const boardHeight = testBounds.maxY_mm - testBounds.minY_mm;
+
+    for (const dfmPoint of testPoints) {
+      const result = adaptDfmPoint(dfmPoint, testBounds);
+      
+      // Check that board coordinates are within expected ranges
+      expect(result.boardPoint.x_mm).toBeGreaterThanOrEqual(0);
+      expect(result.boardPoint.x_mm).toBeLessThanOrEqual(boardWidth);
+      expect(result.boardPoint.y_mm).toBeGreaterThanOrEqual(0);
+      expect(result.boardPoint.y_mm).toBeLessThanOrEqual(boardHeight);
+      
+      // Verify off-board detection works correctly
+      const isOffBoard = isPointOffBoard(result.boardPoint, testBounds);
+      expect(result.isOffBoard).toBe(isOffBoard);
+    }
   });
 });
