@@ -17,6 +17,18 @@ export class MarkerRenderer {
     const r_px = 4;
 
     for (const m of markers) {
+      // Validate marker coordinates
+      if (typeof m.x_mm !== 'number' || typeof m.y_mm !== 'number' || 
+          !isFinite(m.x_mm) || !isFinite(m.y_mm)) {
+        console.warn(`Invalid marker coordinates for ${m.id}:`, { 
+          x_mm: m.x_mm, 
+          y_mm: m.y_mm, 
+          marker: m,
+          keys: Object.keys(m)
+        });
+        continue;
+      }
+
       const p = rc.boardToScreen({ x: m.x_mm, y: m.y_mm });
       const x = p.x;
       const y = p.y;

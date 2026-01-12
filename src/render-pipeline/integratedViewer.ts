@@ -1,6 +1,6 @@
 import "../viewer/viewer.css";
 import type { BoardGeom, ViewerLayers, ViewerSideMode } from '../viewer/types';
-import type { RenderCtx, OverlayApi } from './core/renderContract';
+import type { RenderCtx, OverlayApi, Marker as DfmMarker } from './core/renderContract';
 import { Viewer } from './viewer';
 import { VisibilityManager } from './visibilityManager';
 import { 
@@ -12,7 +12,7 @@ import {
   createSelectionPass,
   type Overlay,
   type OverlayHelpers,
-  type Marker,
+  type Marker as RenderMarker,
   type Selection
 } from './renderPasses';
 
@@ -522,9 +522,65 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
       currentSelection = selection;
       viewer.requestRender("selection-change");
     },
-    addMarker: (marker: Marker) => {
-      markerRenderer.add(marker);
+    addMarker: (marker: DfmMarker) => {
+      // Validate marker before adding
+      if (typeof marker.x_mm !== 'number' || typeof marker.y_mm !== 'number' || 
+          !isFinite(marker.x_mm) || !isFinite(marker.y_mm)) {
+        console.warn(`Invalid marker coordinates for ${marker.id}:`, { 
+          x_mm: marker.x_mm, 
+          y_mm: marker.y_mm, 
+          marker: marker,
+          keys: Object.keys(marker)
+        });
+        return;
+      }
+      
+      // Convert DFM marker to render marker
+      const renderMarker: RenderMarker = {
+        id: marker.id,
+        position: { x: marker.x_mm, y: marker.y_mm },
+        type: 'custom', // Default type for DFM markers
+        data: {
+          ...marker.data,
+          severity: marker.severity,
+          layer: marker.layer,
+          radius_mm: marker.radius_mm
+        }
+      };
+      
+      markerRenderer.add(renderMarker);
       viewer.requestRender("marker-added");
+    },
+    addMarkers: (markers: DfmMarker[]) => {
+      for (const marker of markers) {
+        // Validate each marker before adding
+        if (typeof marker.x_mm !== 'number' || typeof marker.y_mm !== 'number' || 
+            !isFinite(marker.x_mm) || !isFinite(marker.y_mm)) {
+          console.warn(`Invalid marker coordinates for ${marker.id}:`, { 
+            x_mm: marker.x_mm, 
+            y_mm: marker.y_mm, 
+            marker: marker,
+            keys: Object.keys(marker)
+          });
+          continue;
+        }
+        
+        // Convert DFM marker to render marker
+        const renderMarker: RenderMarker = {
+          id: marker.id,
+          position: { x: marker.x_mm, y: marker.y_mm },
+          type: 'custom', // Default type for DFM markers
+          data: {
+            ...marker.data,
+            severity: marker.severity,
+            layer: marker.layer,
+            radius_mm: marker.radius_mm
+          }
+        };
+        
+        markerRenderer.add(renderMarker);
+      }
+      viewer.requestRender("markers-added");
     },
     removeMarker: (id: string) => {
       markerRenderer.remove(id);

@@ -149,6 +149,17 @@ export class MarkerRenderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     for (const marker of this.markers.values()) {
+      // Validate marker position exists
+      if (!marker.position || typeof marker.position.x !== 'number' || typeof marker.position.y !== 'number' ||
+          !isFinite(marker.position.x) || !isFinite(marker.position.y)) {
+        console.warn(`Invalid marker position for ${marker.id}:`, { 
+          position: marker.position, 
+          marker: marker,
+          keys: Object.keys(marker)
+        });
+        continue;
+      }
+
       const screenPos = rc.boardToScreen(marker.position);
       
       // Skip if outside viewport
