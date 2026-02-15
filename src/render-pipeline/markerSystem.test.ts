@@ -142,6 +142,7 @@ describe('MarkerPicker', () => {
       xform,
       now_ms: 0,
       visibility: { gerber: { copper: true, solderMask: true, silk: true, outline: true }, overlays: {}, markers: true },
+      boardBounds: { minX_mm: 0, minY_mm: 0, maxX_mm: 100, maxY_mm: 100 },
       boardToScreen: (p) => xform.boardToScreen({ x: p.x, y: p.y }),
       screenToBoard: (p) => xform.screenToBoard({ x: p.x, y: p.y }),
     };

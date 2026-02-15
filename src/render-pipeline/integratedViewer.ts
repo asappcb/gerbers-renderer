@@ -219,7 +219,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   let sideMode: ViewerSideMode = "top";
   let didInteract = false;
 
-  // Layer images as render passes
+  // Layer images as render passes with board clipping
   function createImagePass(id: string, order: number, imageUrl: string | undefined) {
     if (!imageUrl) return null;
     
@@ -244,12 +244,25 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
         // Set transform to draw in board coordinates
         ctx.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
         
-        // Draw image at true board coordinates using bounds
-        const bounds = boardGeom.board.mm_bounds;
-        const boardWidth = bounds.max_x_mm - bounds.min_x_mm;
-        const boardHeight = bounds.max_y_mm - bounds.min_y_mm;
+        // Build board path for clipping
+        let cornerMm: number | undefined;
+        if (layers.top_board_mask || layers.bottom_board_mask) {
+          // For now, use a reasonable default - could be enhanced to parse from outline
+          // TODO: Parse actual corner radius from outline primitives when available
+          cornerMm = 0.5; // Default rounded corner
+        }
         
-        ctx.drawImage(img, bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
+        // Draw image with board clipping
+        const boardPath = buildBoardPath(ctx, boardGeom, cornerMm);
+        drawLayerClipped(ctx, boardPath, (ctx) => {
+          // Draw image at true board coordinates using bounds
+          if (!boardGeom?.board?.mm_bounds) return;
+          const bounds = boardGeom.board.mm_bounds;
+          const boardWidth = bounds.max_x_mm - bounds.min_x_mm;
+          const boardHeight = bounds.max_y_mm - bounds.min_y_mm;
+          
+          ctx.drawImage(img, bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
+        });
       },
     };
   }
@@ -268,20 +281,152 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
         // Set transform to draw in board coordinates
         ctx.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
         
-        // Draw green FR4 background using true bounds
-        const bounds = boardGeom.board.mm_bounds;
-        const boardWidth = bounds.max_x_mm - bounds.min_x_mm;
-        const boardHeight = bounds.max_y_mm - bounds.min_y_mm;
-        
-        ctx.fillStyle = '#1a5f1a'; // Dark green PCB color
-        ctx.fillRect(bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
-        
-        // Add subtle border
-        ctx.strokeStyle = '#0d3d0d';
-        ctx.lineWidth = 0.1; // mm
-        ctx.strokeRect(bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
+        // Use outline mask for compositing if available
+        if (layers.top_board_mask || layers.bottom_board_mask) {
+          // Draw FR4 using outline mask as clipping mask
+          const outlineImg = new Image();
+          outlineImg.src = layers.top_board_mask || layers.bottom_board_mask || '';
+          
+          outlineImg.onload = () => {
+            // Draw FR4 background
+            if (!boardGeom?.board?.mm_bounds) return;
+            const bounds = boardGeom.board.mm_bounds;
+            const boardWidth = bounds.max_x_mm - bounds.min_x_mm;
+            const boardHeight = bounds.max_y_mm - bounds.min_y_mm;
+            
+            // First draw FR4 color
+            ctx.fillStyle = '#1a5f1a';
+            ctx.fillRect(bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
+            
+            // Then apply outline mask using compositing
+            ctx.globalCompositeOperation = 'destination-in';
+            ctx.drawImage(outlineImg, bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
+            ctx.globalCompositeOperation = 'source-over';
+            
+            // Add subtle border
+            ctx.strokeStyle = '#0d3d0d';
+            ctx.lineWidth = 0.1;
+            ctx.strokeRect(bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
+          };
+          
+          // Trigger image load if already complete
+          if (outlineImg.complete) {
+            (outlineImg.onload as (() => void))();
+          }
+        } else {
+          // Fallback: Draw simple rectangular FR4
+          const bounds = boardGeom.board.mm_bounds;
+          const boardWidth = bounds.max_x_mm - bounds.min_x_mm;
+          const boardHeight = bounds.max_y_mm - bounds.min_y_mm;
+          
+          ctx.fillStyle = '#1a5f1a';
+          ctx.fillRect(bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
+          
+          ctx.strokeStyle = '#0d3d0d';
+          ctx.lineWidth = 0.1;
+          ctx.strokeRect(bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
+        }
       },
     };
+  }
+
+  // Parse actual outline geometry from SVG mask to get real board shape
+  function parseOutlineGeometry(maskSvg: string): Path2D | null {
+    try {
+      // Extract the path data from the SVG mask
+      const pathMatch = maskSvg.match(/<path[^>]*d="([^"]*)"/);
+      if (pathMatch) {
+        const pathData = pathMatch[1];
+        const parser = new Path2D();
+        // Simple path parsing - this could be enhanced for full SVG parsing
+        const commands = pathData.split(/([MmLlHhVvCcSsQqAaZz])/);
+        let x = 0, y = 0;
+        
+        for (let i = 0; i < commands.length; i++) {
+          const cmd = commands[i];
+          if (cmd === 'M') {
+            // Move to
+            const coords = commands[++i]?.split(/[\s,]+/);
+            if (coords && coords.length >= 2) {
+              x = parseFloat(coords[0]);
+              y = parseFloat(coords[1]);
+              parser.moveTo(x, y);
+            }
+          } else if (cmd === 'L') {
+            // Line to
+            const coords = commands[++i]?.split(/[\s,]+/);
+            if (coords && coords.length >= 2) {
+              x = parseFloat(coords[0]);
+              y = parseFloat(coords[1]);
+              parser.lineTo(x, y);
+            }
+          } else if (cmd === 'Z') {
+            parser.closePath();
+          }
+        }
+        return parser;
+      }
+    } catch (e) {
+      console.warn('Failed to parse outline geometry:', e);
+      return null;
+    }
+    return null;
+  }
+
+  // Build board silhouette path from outline with rounded corners
+  function buildBoardPath(ctx: CanvasRenderingContext2D, boardGeom: BoardGeom | null, cornerMm?: number): Path2D {
+    if (!boardGeom?.board?.mm_bounds) return new Path2D();
+    
+    const bounds = boardGeom.board.mm_bounds;
+    const boardX = bounds.min_x_mm;
+    const boardY = bounds.min_y_mm;
+    const boardW = bounds.max_x_mm - bounds.min_x_mm;
+    const boardH = bounds.max_y_mm - bounds.min_y_mm;
+    
+    // Use corner radius directly in mm (path will be transformed later)
+    const rMm = cornerMm || 0;
+    
+    return roundedRectPathMm(boardX, boardY, boardW, boardH, rMm);
+  }
+
+  function roundedRectPathMm(x: number, y: number, w: number, h: number, r: number): Path2D {
+    const p = new Path2D();
+    const rr = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+    
+    p.moveTo(x + rr, y);
+    p.lineTo(x + w - rr, y);
+    p.quadraticCurveTo(x + w, y, x + w, y + rr);
+    p.lineTo(x + w, y + h - rr);
+    p.quadraticCurveTo(x + w, y + h, x + w - rr, y + h);
+    p.lineTo(x + rr, y + h);
+    p.quadraticCurveTo(x, y + h, x, y + h - rr);
+    p.lineTo(x, y + rr);
+    p.quadraticCurveTo(x, y, x + rr, y);
+    p.closePath();
+    return p;
+  }
+
+  function drawFr4Clipped(ctx: CanvasRenderingContext2D, boardPath: Path2D) {
+    ctx.save();
+    ctx.clip(boardPath);
+    
+    // Fill FR4 using the clipped path
+    ctx.fillStyle = '#1a5f1a';
+    ctx.fill(boardPath);
+    
+    // Add subtle border
+    ctx.strokeStyle = '#0d3d0d';
+    ctx.lineWidth = 0.1;
+    ctx.stroke(boardPath);
+    
+    ctx.restore();
+  }
+
+  function drawLayerClipped(ctx: CanvasRenderingContext2D, boardPath: Path2D, drawFn: (ctx: CanvasRenderingContext2D) => void) {
+    ctx.save();
+    ctx.clip(boardPath);
+    drawFn(ctx);
+    ctx.restore();
   }
 
   function updateRenderPasses() {

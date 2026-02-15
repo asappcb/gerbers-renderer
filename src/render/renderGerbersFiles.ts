@@ -145,6 +145,186 @@ function buildBoardMaskSvg(stageWpx: number, stageHpx: number) {
 </svg>`.trim();
 }
 
+type Pt = { x: number; y: number };
+
+// Snap points so track endpoints connect even with tiny floating error
+function snapKey(p: Pt, epsMm = 1e-4): string {
+  const sx = Math.round(p.x / epsMm) * epsMm;
+  const sy = Math.round(p.y / epsMm) * epsMm;
+  return `${sx.toFixed(4)},${sy.toFixed(4)}`;
+}
+
+function polygonAreaMm2(loop: Pt[]): number {
+  // Shoelace
+  let a = 0;
+  const n = loop.length;
+  for (let i = 0; i < n; i++) {
+    const p = loop[i];
+    const q = loop[(i + 1) % n];
+    a += p.x * q.y - q.x * p.y;
+  }
+  return 0.5 * a;
+}
+
+function loopToSvgPath(loop: Pt[], bounds: BoundsMm, pxPerMm: number): string {
+  if (!loop.length) return "";
+  const toPx = (p: Pt) => ({
+    x: (p.x - bounds.minX) * pxPerMm,
+    y: (bounds.maxY - p.y) * pxPerMm,
+  });
+
+  const p0 = toPx(loop[0]);
+  const parts: string[] = [`M ${p0.x.toFixed(2)} ${p0.y.toFixed(2)}`];
+  for (let i = 1; i < loop.length; i++) {
+    const pi = toPx(loop[i]);
+    parts.push(`L ${pi.x.toFixed(2)} ${pi.y.toFixed(2)}`);
+  }
+  parts.push("Z");
+  return parts.join(" ");
+}
+
+// Attempt to reconstruct closed loops from outline tracks.
+// This assumes the outline is drawn as connected segments (common for Edge.Cuts exports).
+function extractLoopsFromTracks(tracks: { start: Pt; end: Pt }[]): Pt[][] {
+  const adj = new Map<string, Pt[]>();
+  const keyToPt = new Map<string, Pt>();
+
+  const addEdge = (a: Pt, b: Pt) => {
+    const ka = snapKey(a);
+    const kb = snapKey(b);
+    if (!adj.has(ka)) adj.set(ka, []);
+    if (!adj.has(kb)) adj.set(kb, []);
+    adj.get(ka)!.push(b);
+    adj.get(kb)!.push(a);
+    if (!keyToPt.has(ka)) keyToPt.set(ka, a);
+    if (!keyToPt.has(kb)) keyToPt.set(kb, b);
+  };
+
+  for (const t of tracks) addEdge(t.start, t.end);
+
+  const used = new Set<string>(); // edge usage key "ka|kb" sorted
+  const edgeKey = (a: Pt, b: Pt) => {
+    const ka = snapKey(a);
+    const kb = snapKey(b);
+    return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+  };
+
+  const loops: Pt[][] = [];
+
+  for (const [kStart, nbrs] of adj.entries()) {
+    const startPt = keyToPt.get(kStart)!;
+    for (const nbr of nbrs) {
+      const ek = edgeKey(startPt, nbr);
+      if (used.has(ek)) continue;
+
+      // Walk a loop
+      const loop: Pt[] = [startPt];
+      let prev = startPt;
+      let curr = nbr;
+
+      used.add(ek);
+
+      // guard against infinite walks
+      for (let step = 0; step < 100000; step++) {
+        loop.push(curr);
+
+        const kCurr = snapKey(curr);
+        const neighbors = adj.get(kCurr) ?? [];
+        if (neighbors.length === 0) break;
+
+        // choose the next neighbor that is not the previous point, prefer unused edge
+        let next: Pt | null = null;
+
+        for (const cand of neighbors) {
+          // skip going back if possible
+          if (snapKey(cand) === snapKey(prev) && neighbors.length > 1) continue;
+          const ek2 = edgeKey(curr, cand);
+          if (!used.has(ek2)) {
+            next = cand;
+            used.add(ek2);
+            break;
+          }
+        }
+
+        // if all edges used, just pick a neighbor to close if possible
+        if (!next) {
+          next = neighbors[0];
+        }
+
+        prev = curr;
+        curr = next;
+
+        // close loop if we returned to start
+        if (snapKey(curr) === snapKey(startPt)) {
+          // do not duplicate the start point again
+          break;
+        }
+      }
+
+      // accept only decent loops
+      if (loop.length >= 3) loops.push(loop);
+    }
+  }
+
+  // De-duplicate loops that are the same cycle
+  // Keep it simple: sort by absolute area and keep largest unique ones
+  loops.sort((a, b) => Math.abs(polygonAreaMm2(b)) - Math.abs(polygonAreaMm2(a)));
+  const out: Pt[][] = [];
+  const seen = new Set<string>();
+  for (const lp of loops) {
+    const sig = lp.map((p) => snapKey(p)).join(";");
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    out.push(lp);
+  }
+  return out;
+}
+
+function buildBoardMaskFromOutline(
+  outline: ReturnType<typeof parseGerberFile>,
+  bounds: BoundsMm
+): string {
+  const wMm = bounds.maxX - bounds.minX;
+  const hMm = bounds.maxY - bounds.minY;
+  const wPx = Math.max(1, Math.round(mmToPx(wMm)));
+  const hPx = Math.max(1, Math.round(mmToPx(hMm)));
+  const pxPerMm = mmToPx(1);
+
+  const paths: string[] = [];
+
+  // Prefer regions if present (best case)
+  for (const r of outline.regions) {
+    for (const loop of r.loops) {
+      paths.push(loopToSvgPath(loop, bounds, pxPerMm));
+    }
+  }
+
+  // Fallback: reconstruct loops from tracks
+  if (paths.length === 0 && outline.tracks.length) {
+    const loops = extractLoopsFromTracks(outline.tracks);
+    // Keep only the largest loop as outer boundary if we have many garbage loops
+    if (loops.length) {
+      const largest = loops[0];
+      paths.push(loopToSvgPath(largest, bounds, pxPerMm));
+      // Optional: include other loops too (could be internal cutouts)
+      for (let i = 1; i < loops.length; i++) {
+        paths.push(loopToSvgPath(loops[i], bounds, pxPerMm));
+      }
+    }
+  }
+
+  // If still nothing, fall back to rectangular mask (avoid breaking rendering)
+  if (paths.length === 0) {
+    return buildBoardMaskSvg(wPx, hPx);
+  }
+
+  return `
+<svg xmlns="http://www.w3.org/2000/svg" width="${wPx}" height="${hPx}" viewBox="0 0 ${wPx} ${hPx}">
+  <rect x="0" y="0" width="${wPx}" height="${hPx}" fill="black"/>
+  <path d="${paths.join(" ")}" fill="white" fill-rule="evenodd"/>
+</svg>`.trim();
+}
+
 // Helper function to calculate bounding box of a region
 function bboxOfRegion(region: { loops: { x: number; y: number }[][] }): { minX: number; minY: number; maxX: number; maxY: number } {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -165,15 +345,14 @@ function bboxOfRegion(region: { loops: { x: number; y: number }[][] }): { minX: 
 function isNegativePlaneLayer(prims: ReturnType<typeof parseGerberFile>, bounds: BoundsMm): boolean {
   const boardArea = (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
 
-  let largestDarkRegionArea = 0;
-  let largestClearRegionArea = 0;
+  let largestDarkRegionBbox = 0;
+  let largestClearRegionBbox = 0;
 
   for (const r of prims.regions) {
     const bb = bboxOfRegion(r);
     const area = (bb.maxX - bb.minX) * (bb.maxY - bb.minY);
-
-    if (r.polarity === "clear") largestClearRegionArea = Math.max(largestClearRegionArea, area);
-    else largestDarkRegionArea = Math.max(largestDarkRegionArea, area);
+    if (r.polarity === "clear") largestClearRegionBbox = Math.max(largestClearRegionBbox, area);
+    else largestDarkRegionBbox = Math.max(largestDarkRegionBbox, area);
   }
 
   const darkCount =
@@ -186,15 +365,19 @@ function isNegativePlaneLayer(prims: ReturnType<typeof parseGerberFile>, bounds:
     prims.flashes.filter((f) => f.polarity === "clear").length +
     prims.regions.filter((r) => r.polarity === "clear").length;
 
-  const darkPlane = largestDarkRegionArea > boardArea * 0.7;
-  const clearDominates = clearCount > darkCount * 3;
-  const hugeClearRegion = largestClearRegionArea > boardArea * 0.7;
+  const hasHugeClear = largestClearRegionBbox > boardArea * 0.85;
+  const hasHugeDark = largestDarkRegionBbox > boardArea * 0.85;
 
-  // If a big DARK plane exists, do NOT invert baseline.
-  if (darkPlane) return false;
+  // If there is a huge DARK region, do not invert
+  if (hasHugeDark) return false;
 
-  // Only invert if CLEAR operations dominate OR there is a huge CLEAR region.
-  return clearDominates || hugeClearRegion;
+  // Only invert when there is very strong evidence
+  if (!hasHugeClear) return false;
+
+  // Clear must strongly dominate, otherwise do not invert
+  if (!(clearCount > darkCount * 2)) return false;
+
+  return true;
 }
 
 // Drop-in TS helper: buildLayerSvgWithPolarityMask(...)
@@ -236,16 +419,26 @@ function buildLayerSvgWithPolarityMask(
       const fhMm = (op.heightMm ?? op.diameterMm ?? 0.8);
       const w = Math.max(0.01, Number.isFinite(fwMm) ? fwMm : 0.8) * pxPerMm;
       const h = Math.max(0.01, Number.isFinite(fhMm) ? fhMm : 0.8) * pxPerMm;
-      
+
+      const x = p.x - w / 2;
+      const y = p.y - h / 2;
+
+      // Standard rect / obround
       if (op.shape === "R" || op.shape === "O") {
-        const x = p.x - w / 2;
-        const y = p.y - h / 2;
-        const rx = op.shape === "O" ? Math.min(w, h) * 0.35 : 0;
-        return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" rx="${rx.toFixed(2)}" fill="${paintColor}" fill-opacity="1" />`;
-      } else {
-        const r = Math.max(1, Math.max(w, h) / 2);
-        return `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r.toFixed(2)}" fill="${paintColor}" fill-opacity="1" />`;
+        // Fix obround: true obround has radius = min(w,h)/2
+        const rx = op.shape === "O" ? Math.min(w, h) * 0.5 : 0;
+        return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" rx="${rx.toFixed(2)}" ry="${rx.toFixed(2)}" fill="${paintColor}" fill-opacity="1" />`;
       }
+
+      // Macro-ish rounded rect support: if cornerMm exists, draw rounded rect
+      if (Number.isFinite(op.cornerMm) && (op.cornerMm ?? 0) > 0) {
+        const rx = Math.max(0, (op.cornerMm as number) * pxPerMm);
+        return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" rx="${rx.toFixed(2)}" ry="${rx.toFixed(2)}" fill="${paintColor}" fill-opacity="1" />`;
+      }
+
+      // Fallback circle
+      const r = Math.max(1, Math.max(w, h) / 2);
+      return `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r.toFixed(2)}" fill="${paintColor}" fill-opacity="1" />`;
     }
     
     if (op.kind === "region") {
@@ -270,10 +463,10 @@ function buildLayerSvgWithPolarityMask(
     return "";
   };
 
-  // Render in exact sequence primitives appear
+  // Render// PAINT ARRAY BUILDING - PRESERVES GERBER ORDER
   const paint: string[] = [];
-  paint.push(`<rect x="0" y="0" width="${wPx}" height="${hPx}" fill="${baselineFill}" fill-opacity="1" />`);
 
+  // 🔴 CRITICAL: Paint color determined by polarity per operation
   for (const op of prims.ops) {
     const paintColor = op.polarity === "clear" ? "black" : "white";
     const rendered = renderOp(op, paintColor);
@@ -528,9 +721,12 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
     return u;
   };
 
+  const topMaskSvg = outPrimsN ? buildBoardMaskFromOutline(outPrimsN, b) : buildBoardMaskSvg(wPx, hPx);
+  const botMaskSvg = outPrimsN ? buildBoardMaskFromOutline(outPrimsN, b) : buildBoardMaskSvg(wPx, hPx);
+
   const layers: ViewerLayers = {
-    top_board_mask: addSvg(buildBoardMaskSvg(wPx, hPx)),
-    bottom_board_mask: addSvg(buildBoardMaskSvg(wPx, hPx)),
+    top_board_mask: addSvg(topMaskSvg),
+    bottom_board_mask: addSvg(botMaskSvg),
   };
 
   if (topPrimsN) layers.top_copper = addSvg(buildLayerSvgWithPolarityMask(topPrimsN, b, "#fbbf24", 1.0));

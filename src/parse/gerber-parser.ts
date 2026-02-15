@@ -12,7 +12,7 @@ export type Polarity = "dark" | "clear";
 
 export type Op =
   | { kind: "track"; polarity: Polarity; start: Vec2; end: Vec2; widthMm: number }
-  | { kind: "flash"; polarity: Polarity; position: Vec2; diameterMm: number; shape: string; widthMm?: number; heightMm?: number }
+  | { kind: "flash"; polarity: Polarity; position: Vec2; diameterMm: number; shape: string; widthMm?: number; heightMm?: number; cornerMm?: number }
   | { kind: "region"; polarity: Polarity; loops: Vec2[][] };
 
 export interface GerberPrimitiveTrack {
@@ -36,6 +36,7 @@ export interface GerberPrimitiveFlash {
   shape: string;         // "C" | "R" | "O" | ...
   widthMm?: number;      // for R / O
   heightMm?: number;     // for R / O
+  cornerMm?: number;     // for R / O
   polarity: Polarity;
 }
 
@@ -63,9 +64,11 @@ export interface GerberPrimitives {
 interface Aperture {
   code: number;
   shape: string;         // C, R, O, P, macro, etc.
-  diameterMm?: number;   // effective diameter (for traces / circular pads)
+  diameterMm?: number;   // effective diameter
   widthMm?: number;      // for R / O
   heightMm?: number;     // for R / O
+  cornerMm?: number;     // NEW
+  macroName?: string;     // NEW (optional, if you want)
 }
 
 export interface GerberPrimitiveFlash {
@@ -253,7 +256,8 @@ function handleParameterBlock(block: string, state: ParserState) {
   }
 
   if (body.startsWith("AD")) {
-    const m = /AD(D?)(\d+)([A-Z]),?([0-9.Xx]*)/.exec(body);
+    // Supports both standard shapes (C/R/O/P) and macro names (ROUNDRECT, RRECT, etc)
+    const m = /AD(D?)(\d+)([A-Za-z_.$][A-Za-z0-9_.$]*),?([0-9.Xx]*)/.exec(body);
     if (!m) return;
 
     const code = parseInt(m[2], 10);
@@ -263,29 +267,27 @@ function handleParameterBlock(block: string, state: ParserState) {
     let diameterMm: number | undefined;
     let widthMm: number | undefined;
     let heightMm: number | undefined;
+    let cornerMm: number | undefined;
 
     if (params) {
-      const parts = params.split(/[Xx]/);
-
-      // You can use your existing parser or the more robust one from before.
+      const parts = params.split(/[Xx]/).filter(Boolean);
       const sizeXmm = parts[0] ? parseFloat(parts[0]) * state.unitScale : undefined;
       const sizeYmm = parts[1] ? parseFloat(parts[1]) * state.unitScale : undefined;
+      const sizeRmm = parts[2] ? parseFloat(parts[2]) * state.unitScale : undefined;
 
       if (shape === "C") {
         diameterMm = sizeXmm;
       } else if (shape === "R" || shape === "O") {
         widthMm = sizeXmm;
         heightMm = sizeYmm;
-
-        // For traces we still want a reasonable width, so keep an effective diameter too.
-        if (sizeXmm !== undefined && sizeYmm !== undefined) {
-          diameterMm = Math.min(sizeXmm, sizeYmm);  // use the narrow side as “diameter”
-        } else {
-          diameterMm = sizeXmm ?? sizeYmm;
-        }
+        diameterMm = (sizeXmm !== undefined && sizeYmm !== undefined) ? Math.min(sizeXmm, sizeYmm) : (sizeXmm ?? sizeYmm);
       } else {
-        // Other shapes - keep first param as a generic diameter
-        diameterMm = sizeXmm ?? sizeYmm;
+        // Macro or other: treat first two as width/height if present
+        widthMm = sizeXmm;
+        heightMm = sizeYmm;
+        if (sizeRmm !== undefined) cornerMm = sizeRmm;
+        diameterMm =
+          (sizeXmm !== undefined && sizeYmm !== undefined) ? Math.min(sizeXmm, sizeYmm) : (sizeXmm ?? sizeYmm);
       }
     }
 
@@ -295,6 +297,7 @@ function handleParameterBlock(block: string, state: ParserState) {
       diameterMm,
       widthMm,
       heightMm,
+      cornerMm,
     };
 
     state.apertures.set(code, ap);
@@ -486,6 +489,7 @@ function handleCommandLine(line: string, state: ParserState) {
 
       if (ap.widthMm !== undefined) flash.widthMm = ap.widthMm;
       if (ap.heightMm !== undefined) flash.heightMm = ap.heightMm;
+      if (ap.cornerMm !== undefined) flash.cornerMm = ap.cornerMm;
 
       state.flashes.push(flash);
 
@@ -498,6 +502,7 @@ function handleCommandLine(line: string, state: ParserState) {
         shape: ap.shape,
         widthMm: ap.widthMm,
         heightMm: ap.heightMm,
+        cornerMm: ap.cornerMm,
       });
     }
     state.x = newX;
