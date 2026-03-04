@@ -329,20 +329,33 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     return null;
   }
 
-  // Build board silhouette path from outline with rounded corners
-  function buildBoardPath(ctx: CanvasRenderingContext2D, boardGeom: BoardGeom | null, cornerMm?: number): Path2D {
+  // Build board silhouette path from actual outline loops (preferred) or bounding box fallback.
+  // Gerber uses Y-up; the viewer canvas has Y-down. Transform: viewer_y = max_y_mm + min_y_mm - gerber_y
+  function buildBoardPath(_ctx: CanvasRenderingContext2D, boardGeom: BoardGeom | null, cornerMm?: number): Path2D {
     if (!boardGeom?.board?.mm_bounds) return new Path2D();
-    
+
     const bounds = boardGeom.board.mm_bounds;
-    const boardX = bounds.min_x_mm;
-    const boardY = bounds.min_y_mm;
-    const boardW = bounds.max_x_mm - bounds.min_x_mm;
-    const boardH = bounds.max_y_mm - bounds.min_y_mm;
-    
-    // Use corner radius directly in mm (path will be transformed later)
-    const rMm = cornerMm || 0;
-    
-    return roundedRectPathMm(boardX, boardY, boardW, boardH, rMm);
+
+    if (boardGeom.outline_loops_mm?.length) {
+      const p = new Path2D();
+      const flipY = (gy: number) => bounds.max_y_mm + bounds.min_y_mm - gy;
+      for (const loop of boardGeom.outline_loops_mm) {
+        if (!loop.length) continue;
+        p.moveTo(loop[0].x, flipY(loop[0].y));
+        for (let i = 1; i < loop.length; i++) {
+          p.lineTo(loop[i].x, flipY(loop[i].y));
+        }
+        p.closePath();
+      }
+      return p;
+    }
+
+    // Fallback: bounding box
+    return roundedRectPathMm(
+      bounds.min_x_mm, bounds.min_y_mm,
+      bounds.max_x_mm - bounds.min_x_mm, bounds.max_y_mm - bounds.min_y_mm,
+      cornerMm || 0
+    );
   }
 
   function roundedRectPathMm(x: number, y: number, w: number, h: number, r: number): Path2D {
@@ -399,15 +412,15 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
 
     // Add layer passes in correct order
     const layerConfigs = [
-      { id: "layer:fr4", order: 5, useFR4: true },
+      { id: "layer:fr4",           order:  5, useFR4: true },
       { id: "layer:bottom-copper", order: 10, url: sideMode === "bottom" ? layers.bottom_copper : undefined },
-      { id: "layer:bottom-mask", order: 15, url: sideMode === "bottom" ? layers.bottom_mask : undefined },
-      { id: "layer:bottom-silk", order: 20, url: sideMode === "bottom" ? layers.bottom_silk : undefined },
-      { id: "layer:top-copper", order: 25, url: sideMode === "top" ? layers.top_copper : undefined },
-      { id: "layer:top-mask", order: 30, url: sideMode === "top" ? layers.top_mask : undefined },
-      { id: "layer:top-silk", order: 35, url: sideMode === "top" ? layers.top_silk : undefined },
-      { id: "layer:drills", order: 40, url: layers.drills },
-      { id: "layer:vias", order: 45, url: layers.vias },
+      { id: "layer:bottom-mask",   order: 15, url: sideMode === "bottom" ? layers.bottom_mask   : undefined },
+      { id: "layer:bottom-silk",   order: 20, url: sideMode === "bottom" ? layers.bottom_silk   : undefined },
+      { id: "layer:top-copper",    order: 25, url: sideMode === "top"    ? layers.top_copper    : undefined },
+      { id: "layer:top-mask",      order: 30, url: sideMode === "top"    ? layers.top_mask      : undefined },
+      { id: "layer:top-silk",      order: 35, url: sideMode === "top"    ? layers.top_silk      : undefined },
+      { id: "layer:drills",        order: 40, url: layers.drills },
+      { id: "layer:vias",          order: 45, url: layers.vias },
     ];
 
     layerConfigs.forEach(config => {

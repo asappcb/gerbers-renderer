@@ -8,15 +8,16 @@ export interface ParsedDrillData {
     holes: DrillHole[];
 }
 /**
- * Very naive Excellon drill parser.
+ * Excellon drill file parser.
  *
- * This is intentionally simple and conservative:
- * - It understands basic tool definitions like "T01C0.300"
- * - It understands coordinate lines like "X012345Y067890"
- * - It assumes units are already inches or mm as used in the file, and does
- *   not attempt unit conversion or integer format decoding.
- *
- * For now, you can treat this as a stub and gradually swap in a robust parser
- * if needed. At minimum, it gives you some real hole locations to play with.
+ * Handles:
+ * - M48 header block (terminated by %) for unit/format detection
+ * - METRIC / INCH unit declarations
+ * - FMAT / FS coordinate format (integer + decimal digit counts)
+ * - Tool definitions: T01C0.300
+ * - Tool selection: T01
+ * - Coordinate lines: X1.234Y5.678  or  X012345Y067890 (integer-encoded)
+ * - G90 (absolute coords), G05 (drill mode) — accepted, ignored
+ * - M30 (end of file)
  */
 export declare function parseDrillFile(name: string, content: string): ParsedDrillData;

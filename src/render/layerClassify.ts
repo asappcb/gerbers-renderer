@@ -5,7 +5,8 @@ export type Classified = Partial<{
   bottom_mask: string;
   top_silk: string;
   bottom_silk: string;
-  drills: string;
+  /** All drill files found (supports multiple, e.g. Altium PTH + slots) */
+  drills: string[];
   outline: string;
 }>;
 
@@ -36,6 +37,39 @@ function pickByContains(names: string[], required: string[]) {
     })
     .sort((a, b) => a.length - b.length);
   return candidates[0];
+}
+
+/** Collect ALL files that look like drill files, to handle multi-file drill exports (e.g. Altium). */
+function pickAllDrills(names: string[]): string[] {
+  const results: string[] = [];
+  const nl = (n: string) => norm(n);
+
+  for (const name of names) {
+    const low = nl(name);
+    const base = low.split("/").pop() || low;
+    const ext = base.slice(base.lastIndexOf("."));
+
+    // Standard Excellon extensions
+    if (ext === ".drl" || ext === ".xln" || ext === ".exc" || ext === ".ncd") {
+      results.push(name);
+      continue;
+    }
+
+    // .txt files with drill-hinting names (Altium: PCB-RoundHoles.TXT, PCB-SlotHoles.TXT, etc.)
+    if (ext === ".txt" && (base.includes("hole") || base.includes("drill") || base.includes("npth") || base.includes("-pth"))) {
+      results.push(name);
+      continue;
+    }
+
+    // Name contains drill keyword with standard extensions
+    if ((base.includes("drill") || base.includes("npth") || base.includes("-pth"))
+        && (ext === ".gbr" || ext === ".ger" || ext === ".txt" || ext === "")) {
+      results.push(name);
+      continue;
+    }
+  }
+
+  return results;
 }
 
 export function classifyLayerNames(names: string[]): Classified {
@@ -88,14 +122,7 @@ export function classifyLayerNames(names: string[]): Classified {
     pickByContains(files, ["outline"]) ||
     pickByContains(files, ["board", "outline"]);
 
-  const drills =
-    // Excellon often .drl or .xln or .txt
-    pickByExt(files, [".drl", ".xln"]) ||
-    // Some CAD exports use .txt for drills but be careful: only if name hints drill
-    pickByContains(files, ["drill"]) ||
-    pickByContains(files, ["drills"]) ||
-    pickByContains(files, ["npth"]) ||
-    pickByContains(files, ["pth"]);
+  const drills = pickAllDrills(files);
 
   return {
     top_copper,
@@ -105,6 +132,6 @@ export function classifyLayerNames(names: string[]): Classified {
     top_silk,
     bottom_silk,
     outline,
-    drills,
+    drills: drills.length ? drills : undefined,
   };
 }

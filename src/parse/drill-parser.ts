@@ -12,93 +12,97 @@ export interface ParsedDrillData {
 }
 
 /**
- * Very naive Excellon drill parser.
+ * Excellon drill file parser.
  *
- * This is intentionally simple and conservative:
- * - It understands basic tool definitions like "T01C0.300"
- * - It understands coordinate lines like "X012345Y067890"
- * - It assumes units are already inches or mm as used in the file, and does
- *   not attempt unit conversion or integer format decoding.
- *
- * For now, you can treat this as a stub and gradually swap in a robust parser
- * if needed. At minimum, it gives you some real hole locations to play with.
+ * Handles:
+ * - M48 header block (terminated by %) for unit/format detection
+ * - METRIC / INCH unit declarations
+ * - FMAT / FS coordinate format (integer + decimal digit counts)
+ * - Tool definitions: T01C0.300
+ * - Tool selection: T01
+ * - Coordinate lines: X1.234Y5.678  or  X012345Y067890 (integer-encoded)
+ * - G90 (absolute coords), G05 (drill mode) — accepted, ignored
+ * - M30 (end of file)
  */
 export function parseDrillFile(name: string, content: string): ParsedDrillData {
   const lines = content.split(/\r?\n/);
 
-  const toolDiameters = new Map<string, number>(); // T code -> diameter (same units as file)
+  const toolDiameters = new Map<string, number>(); // T code -> diameter in mm
   let currentTool: string | null = null;
-
   const holes: DrillHole[] = [];
+
+  // Format state
+  let unitScale = 1.0;   // 1 = mm, 25.4 = inch→mm
+  let fmtInt = 2;        // integer digits in coordinate
+  let fmtDec = 4;        // decimal digits in coordinate
+  let inHeader = false;  // inside M48...% block
+
+  const decodeCoord = (raw: string): number => {
+    // If the string contains a decimal point, it's explicit — use directly
+    if (raw.includes(".")) return parseFloat(raw) * unitScale;
+    // Integer-encoded: implied decimal point based on fmtDec
+    const sign = raw.startsWith("-") ? -1 : 1;
+    const digits = raw.replace(/[+\-]/, "");
+    const n = parseInt(digits, 10);
+    if (Number.isNaN(n)) return 0;
+    return sign * (n / Math.pow(10, fmtDec)) * unitScale;
+  };
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
     if (!line) continue;
+    if (line.startsWith(";")) continue; // comment
 
-    // Comment or header lines we ignore for now
-    if (line.startsWith(";")) continue;
+    // M48: start of header
+    if (line === "M48") { inHeader = true; continue; }
+    // % alone: end of header block
+    if (line === "%" && inHeader) { inHeader = false; continue; }
+    // M30: end of program
+    if (line === "M30" || line === "M00") break;
 
-    // Tool definition, examples:
-    // T01C0.300
-    // T02C0.600
-    if (line.startsWith("T") && line.includes("C")) {
-      const toolMatch = /^T(\d+)[C]([\d.]+)/i.exec(line);
-      if (toolMatch) {
-        const toolId = toolMatch[1]; // "01"
-        const diameter = parseFloat(toolMatch[2]);
-        if (!Number.isNaN(diameter)) {
-          toolDiameters.set(toolId, diameter);
-        }
+    if (inHeader) {
+      // Unit mode
+      if (line.startsWith("METRIC")) { unitScale = 1.0; }
+      else if (line.startsWith("INCH")) { unitScale = 25.4; }
+      // Format: FMAT,2 or coordinate format like 000.0000
+      const fmtMatch = /^FMAT,(\d+)\.(\d+)/.exec(line) || /^(\d+)\.(\d+)$/.exec(line);
+      if (fmtMatch) { fmtInt = parseInt(fmtMatch[1], 10); fmtDec = parseInt(fmtMatch[2], 10); }
+      // Tool definitions can appear in header too
+    }
+
+    // Tool definition: T01C0.300 (diameter in current units)
+    if (/^T\d+C[\d.]+/i.test(line)) {
+      const m = /^T(\d+)C([\d.]+)/i.exec(line);
+      if (m) {
+        const d = parseFloat(m[2]) * unitScale;
+        if (!Number.isNaN(d)) toolDiameters.set(m[1], d);
       }
       continue;
     }
 
-    // Tool change, like "T01"
-    if (line.startsWith("T") && !line.includes("C")) {
-      const toolMatch = /^T(\d+)/i.exec(line);
-      if (toolMatch) {
-        currentTool = toolMatch[1];
-      }
+    // Tool selection: T01
+    if (/^T\d+$/i.test(line)) {
+      const m = /^T(\d+)/i.exec(line);
+      if (m) currentTool = m[1];
       continue;
     }
 
-    // Coordinate line, very naive:
-    // X012345Y067890
-    // X1.234Y5.678
-    if (line[0] === "X" || line.includes("X")) {
-      const coordMatch = /X([\-0-9.]+)Y([\-0-9.]+)/i.exec(line);
-      if (!coordMatch) {
-        continue;
-      }
+    // Skip G-codes and other non-coordinate lines
+    if (/^[GRMF]/.test(line) && !/^X/.test(line)) continue;
 
-      const xRaw = coordMatch[1];
-      const yRaw = coordMatch[2];
-      const xVal = parseFloat(xRaw);
-      const yVal = parseFloat(yRaw);
-
-      if (Number.isNaN(xVal) || Number.isNaN(yVal)) {
-        continue;
-      }
-
-      const diameter =
-        currentTool && toolDiameters.has(currentTool)
+    // Coordinate line: X...Y...
+    const coordMatch = /X([+\-]?[\d.]+)Y([+\-]?[\d.]+)/i.exec(line);
+    if (coordMatch) {
+      const xVal = decodeCoord(coordMatch[1]);
+      const yVal = decodeCoord(coordMatch[2]);
+      if (!Number.isNaN(xVal) && !Number.isNaN(yVal)) {
+        const diameter = (currentTool && toolDiameters.has(currentTool))
           ? toolDiameters.get(currentTool)!
-          : 0.6; // default fallback diameter
-
-      holes.push({
-        x: xVal,
-        y: yVal,
-        diameter,
-        plated: true, // default, later you can infer from file or layer
-      });
-      continue;
+          : 0.6;
+        holes.push({ x: xVal, y: yVal, diameter, plated: true });
+      }
     }
-
-    // Everything else is ignored for now
   }
 
-  return {
-    name,
-    holes,
-  };
+  return { name, holes };
 }

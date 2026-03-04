@@ -9,6 +9,12 @@ export type BoardGeom = {
             max_y_mm: number;
         };
     };
+    /** Actual board outline polygon loops in Gerber mm coordinates (Y-up).
+     *  When present, use these for board clipping instead of the bounding box. */
+    outline_loops_mm?: Array<Array<{
+        x: number;
+        y: number;
+    }>>;
 };
 export type ViewerLayers = Partial<{
     top_copper: string;
