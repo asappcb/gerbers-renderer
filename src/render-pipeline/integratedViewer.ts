@@ -63,6 +63,14 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
               </select>
             </div>
 
+            <div class="layer-dropdown" id="layer-dropdown">
+              <button class="btn" id="layer-menu-btn" type="button" title="Layer visibility">
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:14px;height:14px"><path d="M1 4h14M3 8h10M5 12h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                Layers
+              </button>
+              <div class="layer-panel" id="layer-panel" hidden></div>
+            </div>
+
             <button class="btn" id="fit-btn" type="button" title="Fit to viewport">Fit</button>${showDownloadButton ? `
             <button class="btn btn-primary" id="download-btn" type="button" title="Download">
               ${downloadIcon}
@@ -89,6 +97,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   const fitBtn = mustGet<HTMLButtonElement>(root, "#fit-btn");
   const downloadBtn = showDownloadButton ? mustGet<HTMLButtonElement>(root, "#download-btn") : null;
   const radios = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="side"]'));
+  const layerMenuBtn = mustGet<HTMLButtonElement>(root, "#layer-menu-btn");
+  const layerPanel = mustGet<HTMLDivElement>(root, "#layer-panel");
 
   // Initialize render pipeline
   const viewer = new Viewer(canvas, {
@@ -213,6 +223,27 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   viewer.addPass(createMarkerPass(markerRenderer));
   viewer.addPass(createSelectionPass(selectionRenderer, () => currentSelection));
 
+  // Per-pass visibility (true by default)
+  const layerVisible: Record<string, boolean> = {};
+
+  const LAYER_META: Record<string, { label: string; color: string }> = {
+    'layer:fr4':            { label: 'FR4 substrate',     color: '#1a5f1a' },
+    'layer:top-copper':     { label: 'Top copper',        color: '#fbbf24' },
+    'layer:top-mask':       { label: 'Top soldermask',    color: '#fde68a' },
+    'layer:top-silk':       { label: 'Top silkscreen',    color: '#f1f5f9' },
+    'layer:bottom-copper':  { label: 'Bottom copper',     color: '#38bdf8' },
+    'layer:bottom-mask':    { label: 'Bottom soldermask', color: '#bae6fd' },
+    'layer:bottom-silk':    { label: 'Bottom silkscreen', color: '#f1f5f9' },
+    'layer:drills':         { label: 'Drill holes',       color: '#111111' },
+  };
+  // Display order: topmost visual layer first
+  const LAYER_DISPLAY_ORDER = [
+    'layer:drills',
+    'layer:top-silk', 'layer:top-mask', 'layer:top-copper',
+    'layer:bottom-silk', 'layer:bottom-mask', 'layer:bottom-copper',
+    'layer:fr4',
+  ];
+
   // State
   let boardGeom: BoardGeom | null = null;
   let layers: ViewerLayers = {};
@@ -222,19 +253,19 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   // Layer images as render passes with board clipping
   function createImagePass(id: string, order: number, imageUrl: string | undefined) {
     if (!imageUrl) return null;
-    
+    if (!(id in layerVisible)) layerVisible[id] = true;
+
     const img = new Image();
     img.src = imageUrl;
-    
-    // Add load event listener to trigger re-render when image is ready
+
     img.addEventListener('load', () => {
       viewer.requestRender(`image-loaded-${id}`);
     });
-    
+
     return {
       id,
       order,
-      enabled: (rc: RenderCtx) => !!boardGeom?.board?.mm_bounds,
+      enabled: (_rc: RenderCtx) => !!(layerVisible[id] ?? true) && !!boardGeom?.board?.mm_bounds,
       draw: (rc: RenderCtx) => {
         if (!img.complete || !boardGeom?.board?.mm_bounds) return;
         
@@ -268,10 +299,11 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   }
 
   function createFR4Pass(id: string, order: number) {
+    if (!(id in layerVisible)) layerVisible[id] = true;
     return {
       id,
       order,
-      enabled: (rc: RenderCtx) => !!boardGeom?.board?.mm_bounds,
+      enabled: (_rc: RenderCtx) => !!(layerVisible[id] ?? true) && !!boardGeom?.board?.mm_bounds,
       draw: (rc: RenderCtx) => {
         if (!boardGeom?.board?.mm_bounds) return;
 
@@ -438,6 +470,32 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     // Force an immediate render and another one shortly after to handle image loading
     viewer.requestRender("side-switch");
     setTimeout(() => viewer.requestRender("side-switch-delayed"), 50);
+
+    rebuildLayerPanel();
+  }
+
+  function rebuildLayerPanel() {
+    const active = LAYER_DISPLAY_ORDER.filter(id => !!viewer.getPass(id));
+    layerPanel.innerHTML = active.map(id => {
+      const meta = LAYER_META[id] ?? { label: id, color: '#888' };
+      const checked = layerVisible[id] ?? true;
+      const border = meta.color === '#f1f5f9' ? ' border:1px solid #cbd5e1;' : '';
+      return `<label class="layer-item" data-layer-id="${id}">` +
+        `<span class="layer-swatch" style="background:${meta.color};${border}"></span>` +
+        `<span>${meta.label}</span>` +
+        `<input type="checkbox"${checked ? ' checked' : ''} />` +
+        `</label>`;
+    }).join('');
+
+    layerPanel.querySelectorAll<HTMLInputElement>('.layer-item input').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const layerId = (cb.closest<HTMLElement>('[data-layer-id]'))?.dataset.layerId;
+        if (layerId) {
+          layerVisible[layerId] = cb.checked;
+          viewer.requestRender('layer-toggle');
+        }
+      });
+    });
   }
 
   function fitBoardToViewport(marginFrac = 0.08) {
@@ -568,6 +626,20 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
 
   fitBtn.addEventListener("click", () => fitBoardToViewport(0.08));
   downloadBtn?.addEventListener("click", () => opts.onDownload?.());
+
+  layerMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = !layerPanel.hidden;
+    layerPanel.hidden = open;
+    layerMenuBtn.classList.toggle("active", !open);
+  });
+  // Close on outside click
+  document.addEventListener("click", (e) => {
+    if (!layerPanel.hidden && !layerPanel.contains(e.target as Node) && e.target !== layerMenuBtn) {
+      layerPanel.hidden = true;
+      layerMenuBtn.classList.remove("active");
+    }
+  });
 
   radios.forEach((r) => {
     r.addEventListener("change", () => {

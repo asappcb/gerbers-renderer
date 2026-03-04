@@ -255,6 +255,66 @@
   pointer-events: none;
 }
 
+/* ── Layer visibility dropdown ───────────────────────────────── */
+
+.layer-dropdown {
+  position: relative;
+}
+
+.layer-dropdown .btn.active {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.layer-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 196px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.10);
+  padding: 4px 0;
+  z-index: 200;
+}
+
+.layer-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  color: #334155;
+  white-space: nowrap;
+}
+
+.layer-item:hover {
+  background: #f8fafc;
+}
+
+.layer-item span:last-of-type {
+  flex: 1;
+}
+
+.layer-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.layer-item input[type="checkbox"] {
+  margin: 0;
+  margin-left: auto;
+  pointer-events: none;
+  accent-color: #0f172a;
+}
+
+/* ── ──────────────────────────────────────────────────────────── */
+
 .board-clip {
   position: relative;
   width: 100%;
