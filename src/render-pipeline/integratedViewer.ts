@@ -236,13 +236,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     'layer:bottom-silk':    { label: 'Bottom silkscreen', color: '#f1f5f9' },
     'layer:drills':         { label: 'Drill holes',       color: '#111111' },
   };
-  // Display order: topmost visual layer first
-  const LAYER_DISPLAY_ORDER = [
-    'layer:drills',
-    'layer:top-silk', 'layer:top-mask', 'layer:top-copper',
-    'layer:bottom-silk', 'layer:bottom-mask', 'layer:bottom-copper',
-    'layer:fr4',
-  ];
+  // Inner layer colors (cycled if >5 inner layers)
+  const INNER_LAYER_COLORS = ['#a78bfa', '#34d399', '#fb923c', '#60a5fa', '#f472b6'];
 
   // State
   let boardGeom: BoardGeom | null = null;
@@ -431,23 +426,24 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   }
 
   function updateRenderPasses() {
-    // Clear existing layer passes
-    const existingPasses = ["layer:fr4", "layer:top-copper", "layer:bottom-copper", 
-                           "layer:top-mask", "layer:bottom-mask", "layer:top-silk", 
-                           "layer:bottom-silk", "layer:drills", "layer:vias"];
-    
-    existingPasses.forEach(id => {
-      viewer.removePass(id);
-    });
+    // Clear existing layer passes (fixed + any previously registered inner layers)
+    const existingPasses = [
+      "layer:fr4", "layer:top-copper", "layer:bottom-copper",
+      "layer:top-mask", "layer:bottom-mask", "layer:top-silk",
+      "layer:bottom-silk", "layer:drills", "layer:vias",
+      ...Object.keys(layerVisible).filter((id) => id.startsWith("layer:inner-")),
+    ];
+    existingPasses.forEach((id) => viewer.removePass(id));
 
     if (!boardGeom) return;
 
     // Add layer passes in correct order
-    const layerConfigs = [
+    const layerConfigs: Array<{ id: string; order: number; url?: string; useFR4?: boolean }> = [
       { id: "layer:fr4",           order:  5, useFR4: true },
       { id: "layer:bottom-copper", order: 10, url: sideMode === "bottom" ? layers.bottom_copper : undefined },
       { id: "layer:bottom-mask",   order: 15, url: sideMode === "bottom" ? layers.bottom_mask   : undefined },
       { id: "layer:bottom-silk",   order: 20, url: sideMode === "bottom" ? layers.bottom_silk   : undefined },
+      // Inner layers occupy orders 21..24 (registered dynamically below)
       { id: "layer:top-copper",    order: 25, url: sideMode === "top"    ? layers.top_copper    : undefined },
       { id: "layer:top-mask",      order: 30, url: sideMode === "top"    ? layers.top_mask      : undefined },
       { id: "layer:top-silk",      order: 35, url: sideMode === "top"    ? layers.top_silk      : undefined },
@@ -455,17 +451,28 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
       { id: "layer:vias",          order: 45, url: layers.vias },
     ];
 
-    layerConfigs.forEach(config => {
+    layerConfigs.forEach((config) => {
       let pass;
       if (config.useFR4) {
         pass = createFR4Pass(config.id, config.order);
       } else if (config.url) {
         pass = createImagePass(config.id, config.order, config.url);
       }
-      if (pass) {
-        viewer.addPass(pass);
-      }
+      if (pass) viewer.addPass(pass);
     });
+
+    // Inner copper layers (visible on both sides, between bottom and top copper)
+    if (layers.inner_copper) {
+      layers.inner_copper.forEach((url, idx) => {
+        const id = `layer:inner-${idx + 1}`;
+        LAYER_META[id] = {
+          label: `Inner ${idx + 1}`,
+          color: INNER_LAYER_COLORS[idx % INNER_LAYER_COLORS.length],
+        };
+        const pass = createImagePass(id, 21 + idx, url); // orders 21, 22, 23…
+        if (pass) viewer.addPass(pass);
+      });
+    }
 
     // Force an immediate render and another one shortly after to handle image loading
     viewer.requestRender("side-switch");
@@ -475,7 +482,24 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   }
 
   function rebuildLayerPanel() {
-    const active = LAYER_DISPLAY_ORDER.filter(id => !!viewer.getPass(id));
+    // Build display order dynamically, inserting inner layers between bottom and top copper
+    const innerIds = Object.keys(LAYER_META)
+      .filter((id) => id.startsWith("layer:inner-"))
+      .sort((a, b) => {
+        const na = parseInt(a.split("-").pop() || "0", 10);
+        const nb = parseInt(b.split("-").pop() || "0", 10);
+        return na - nb;
+      });
+
+    const LAYER_DISPLAY_ORDER = [
+      "layer:drills",
+      "layer:top-silk", "layer:top-mask", "layer:top-copper",
+      ...innerIds,
+      "layer:bottom-silk", "layer:bottom-mask", "layer:bottom-copper",
+      "layer:fr4",
+    ];
+
+    const active = LAYER_DISPLAY_ORDER.filter((id) => !!viewer.getPass(id));
     layerPanel.innerHTML = active.map(id => {
       const meta = LAYER_META[id] ?? { label: id, color: '#888' };
       const checked = layerVisible[id] ?? true;

@@ -3,7 +3,7 @@
 import type { BoardGeom, ViewerLayers } from "../viewer/types";
 import { classifyLayerNames } from "./layerClassify";
 import { parseGerberFile } from "../parse/gerber-parser";
-import { parseDrillFile } from "../parse/drill-parser";
+import { parseDrillFile, type DrillSlot } from "../parse/drill-parser";
 import type { LayerRole } from "../io/file-classifier";
 
 type BoundsMm = { minX: number; minY: number; maxX: number; maxY: number };
@@ -55,6 +55,15 @@ function scaleDrills(holes: Array<{ x: number; y: number; diameter: number }>, s
   return holes.map((h) => ({ x: h.x * s, y: h.y * s, diameter: (h.diameter ?? 0) * s }));
 }
 
+function scaleSlots(slots: DrillSlot[], s: number): DrillSlot[] {
+  if (s === 1) return slots;
+  return slots.map((sl) => ({
+    x1: sl.x1 * s, y1: sl.y1 * s,
+    x2: sl.x2 * s, y2: sl.y2 * s,
+    diameter: (sl.diameter ?? 0) * s,
+  }));
+}
+
 function svgToBlobUrl(svg: string): string {
   return URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
 }
@@ -97,12 +106,22 @@ function boundsFromGerber(prims: ReturnType<typeof parseGerberFile>): BoundsMm {
   return b;
 }
 
-function boundsFromDrills(holes: Array<{ x: number; y: number; diameter: number }>): BoundsMm {
+function boundsFromDrills(
+  holes: Array<{ x: number; y: number; diameter: number }>,
+  slots: DrillSlot[] = [],
+): BoundsMm {
   const b = initBounds();
   for (const h of holes) {
     const r = (h.diameter || 0) / 2;
     expandBounds(b, h.x - r, h.y - r);
     expandBounds(b, h.x + r, h.y + r);
+  }
+  for (const s of slots) {
+    const r = (s.diameter || 0) / 2;
+    expandBounds(b, s.x1 - r, s.y1 - r);
+    expandBounds(b, s.x1 + r, s.y1 + r);
+    expandBounds(b, s.x2 - r, s.y2 - r);
+    expandBounds(b, s.x2 + r, s.y2 + r);
   }
   return b;
 }
@@ -597,25 +616,42 @@ function buildSilkSvg(prims: ReturnType<typeof parseGerberFile>, bounds: BoundsM
 </svg>`.trim();
 }
 
-function buildDrillsSvg(holes: Array<{ x: number; y: number; diameter: number }>, bounds: BoundsMm) {
+function buildDrillsSvg(
+  holes: Array<{ x: number; y: number; diameter: number }>,
+  slots: DrillSlot[],
+  bounds: BoundsMm,
+) {
   const wMm = bounds.maxX - bounds.minX;
   const hMm = bounds.maxY - bounds.minY;
   const wPx = Math.round(mmToPx(wMm));
   const hPx = Math.round(mmToPx(hMm));
   const pxPerMm = mmToPx(1);
 
-  const els = holes.map((h) => {
+  const holeEls = holes.map((h) => {
     const p = toLocalMm(h.x, h.y, bounds);
     const cx = p.x * pxPerMm;
     const cy = p.y * pxPerMm;
     const r = Math.max(1.5, ((h.diameter || 0.6) * pxPerMm) / 2);
-    // Drill hole: dark filled circle with a subtle copper annular ring suggestion
     return `<circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${(r + 2).toFixed(2)}" fill="#c97c2a" /><circle cx="${cx.toFixed(2)}" cy="${cy.toFixed(2)}" r="${r.toFixed(2)}" fill="#111111" />`;
+  });
+
+  // Slots rendered as rounded-cap lines (stadium/capsule shape)
+  const slotEls = slots.map((s) => {
+    const p1 = toLocalMm(s.x1, s.y1, bounds);
+    const p2 = toLocalMm(s.x2, s.y2, bounds);
+    const x1 = (p1.x * pxPerMm).toFixed(2), y1 = (p1.y * pxPerMm).toFixed(2);
+    const x2 = (p2.x * pxPerMm).toFixed(2), y2 = (p2.y * pxPerMm).toFixed(2);
+    const sw = Math.max(3, (s.diameter || 0.6) * pxPerMm);
+    return (
+      `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#c97c2a" stroke-width="${(sw + 4).toFixed(2)}" stroke-linecap="round" />` +
+      `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#111111" stroke-width="${sw.toFixed(2)}" stroke-linecap="round" />`
+    );
   });
 
   return `
 <svg xmlns="http://www.w3.org/2000/svg" width="${wPx}" height="${hPx}" viewBox="0 0 ${wPx} ${hPx}">
-  ${els.join("\n  ")}
+  ${holeEls.join("\n  ")}
+  ${slotEls.join("\n  ")}
 </svg>`.trim();
 }
 
@@ -647,18 +683,23 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
     : [];
   const topSilkText = await readText(classified.top_silk);
   const botSilkText = await readText(classified.bottom_silk);
+  const innerCopperTexts = classified.inner_copper?.length
+    ? await Promise.all(classified.inner_copper.map((p) => readText(p)))
+    : [];
 
   const topPrims = topText ? parseGerberFile(classified.top_copper || "top", topText, "TopCopper" as LayerRole) : null;
   const botPrims = botText ? parseGerberFile(classified.bottom_copper || "bot", botText, "BottomCopper" as LayerRole) : null;
   const outPrims = outText ? parseGerberFile(classified.outline || "outline", outText, "Outline" as LayerRole) : null;
 
   const drillHoles: Array<{ x: number; y: number; diameter: number }> = [];
+  const drillSlots: DrillSlot[] = [];
   if (classified.drills) {
     for (let i = 0; i < classified.drills.length; i++) {
       const text = drillTexts[i];
       if (text) {
         const parsed = parseDrillFile(classified.drills[i], text);
         for (const h of parsed.holes) drillHoles.push({ x: h.x, y: h.y, diameter: h.diameter });
+        for (const s of parsed.slots) drillSlots.push(s);
       }
     }
   }
@@ -670,11 +711,14 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
   const botSilkPrims = botSilkText ? parseGerberFile(classified.bottom_silk || "bot_silk", botSilkText, "BottomSilkscreen" as any) : null;
   const topMaskPrims = topMaskText ? parseGerberFile(classified.top_mask || "top_mask", topMaskText, "top_mask" as LayerRole) : null;
   const botMaskPrims = botMaskText ? parseGerberFile(classified.bottom_mask || "bot_mask", botMaskText, "bottom_mask" as LayerRole) : null;
+  const innerCopperPrims = innerCopperTexts.map((text, i) =>
+    text ? parseGerberFile(classified.inner_copper![i], text, "InnerCopper" as LayerRole) : null
+  );
 
   const topB = topPrims ? ensureFiniteBounds(boundsFromGerber(topPrims)) : null;
   const botB = botPrims ? ensureFiniteBounds(boundsFromGerber(botPrims)) : null;
   const outB = outPrims ? ensureFiniteBounds(boundsFromGerber(outPrims)) : null;
-  const drlB = drillHoles.length ? ensureFiniteBounds(boundsFromDrills(drillHoles)) : null;
+  const drlB = (drillHoles.length || drillSlots.length) ? ensureFiniteBounds(boundsFromDrills(drillHoles, drillSlots)) : null;
 
   const topSilkB = topSilkPrims ? ensureFiniteBounds(boundsFromGerber(topSilkPrims)) : null;
   const botSilkB = botSilkPrims ? ensureFiniteBounds(boundsFromGerber(botSilkPrims)) : null;
@@ -698,14 +742,21 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
   const topMaskScale = topMaskB ? detectScaleFactor(topMaskB.maxX - topMaskB.minX, refW) : 1;
   const botMaskScale = botMaskB ? detectScaleFactor(botMaskB.maxX - botMaskB.minX, refW) : 1;
 
+  const innerCopperBounds = innerCopperPrims.map((p) => p ? ensureFiniteBounds(boundsFromGerber(p)) : null);
+  const innerCopperScales = innerCopperBounds.map((b) => b ? detectScaleFactor(b.maxX - b.minX, refW) : 1);
+
   const topPrimsN = topPrims ? scaleGerberPrims(topPrims, topScale) : null;
   const botPrimsN = botPrims ? scaleGerberPrims(botPrims, botScale) : null;
   const outPrimsN = outPrims ? scaleGerberPrims(outPrims, outScale) : null;
   const drillHolesN = drillHoles.length ? scaleDrills(drillHoles, drlScale) : [];
+  const drillSlotsN = drillSlots.length ? scaleSlots(drillSlots, drlScale) : [];
   const topSilkPrimsN = topSilkPrims ? scaleGerberPrims(topSilkPrims, topSilkScale) : null;
   const botSilkPrimsN = botSilkPrims ? scaleGerberPrims(botSilkPrims, botSilkScale) : null;
   const topMaskPrimsN = topMaskPrims ? scaleGerberPrims(topMaskPrims, topMaskScale) : null;
   const botMaskPrimsN = botMaskPrims ? scaleGerberPrims(botMaskPrims, botMaskScale) : null;
+  const innerCopperPrimsN = innerCopperPrims.map((p, i) =>
+    p ? scaleGerberPrims(p, innerCopperScales[i]) : null
+  );
 
   // Board bounds: outline preferred, else copper. Do not let silk/drills expand size.
   let boardB: BoundsMm | null = null;
@@ -781,7 +832,15 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
   // Soldermask openings rendered as bright copper highlights (pad openings where mask is absent)
   if (topMaskPrimsN) layers.top_mask = addSvg(buildLayerSvgWithPolarityMask(topMaskPrimsN, b, "#fbbf24", 0.9));
   if (botMaskPrimsN) layers.bottom_mask = addSvg(buildLayerSvgWithPolarityMask(botMaskPrimsN, b, "#38bdf8", 0.9));
-  if (drillHolesN.length) layers.drills = addSvg(buildDrillsSvg(drillHolesN, b));
+  if (drillHolesN.length || drillSlotsN.length) layers.drills = addSvg(buildDrillsSvg(drillHolesN, drillSlotsN, b));
+
+  const INNER_COLORS = ["#a78bfa", "#34d399", "#fb923c", "#60a5fa", "#f472b6"];
+  const innerCopperUrls: string[] = [];
+  for (let i = 0; i < innerCopperPrimsN.length; i++) {
+    const prims = innerCopperPrimsN[i];
+    if (prims) innerCopperUrls.push(addSvg(buildLayerSvgWithPolarityMask(prims, b, INNER_COLORS[i % INNER_COLORS.length], 1.0)));
+  }
+  if (innerCopperUrls.length) layers.inner_copper = innerCopperUrls;
   if (topSilkPrimsN) layers.top_silk = addSvg(buildSilkSvg(topSilkPrimsN, b));
   if (botSilkPrimsN) layers.bottom_silk = addSvg(buildSilkSvg(botSilkPrimsN, b));
 

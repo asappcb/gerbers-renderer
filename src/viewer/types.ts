@@ -25,6 +25,9 @@ export type ViewerLayers = Partial<{
   top_silk: string;
   bottom_silk: string;
 
+  // Inner copper (ordered inner-1 nearest top to inner-N nearest bottom)
+  inner_copper: string[];
+
   // Overlays
   drills: string;
   vias: string;

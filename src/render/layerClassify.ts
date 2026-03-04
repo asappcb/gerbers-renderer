@@ -8,6 +8,8 @@ export type Classified = Partial<{
   /** All drill files found (supports multiple, e.g. Altium PTH + slots) */
   drills: string[];
   outline: string;
+  /** Inner copper layers, ordered (inner-1 nearest top, inner-N nearest bottom) */
+  inner_copper: string[];
 }>;
 
 function norm(s: string) {
@@ -37,6 +39,33 @@ function pickByContains(names: string[], required: string[]) {
     })
     .sort((a, b) => a.length - b.length);
   return candidates[0];
+}
+
+/** Collect inner copper layer files (KiCad In1_Cu, Altium .G2/.GL2, etc.), excluding top/bottom. */
+function pickAllInnerCopper(names: string[], topCopper?: string, botCopper?: string): string[] {
+  const skip = new Set<string>([topCopper, botCopper].filter(Boolean) as string[]);
+  const results: string[] = [];
+
+  for (const name of names) {
+    if (skip.has(name)) continue;
+    const low = norm(name);
+    const base = low.split("/").pop() || low;
+    const dotIdx = base.lastIndexOf(".");
+    const ext = dotIdx >= 0 ? base.slice(dotIdx) : "";
+
+    // KiCad: In1_Cu.gbr, project.In1_Cu.gbr, etc.
+    if (/in\d+_cu/.test(base)) { results.push(name); continue; }
+
+    // Altium: .G2, .G3, .GL2, .GL3, .G4, etc. (numbered >= 2 to avoid .G1 top copper)
+    // Excludes standard gerber extensions: .gtl, .gbl, .gts, .gbs, .gto, .gbo, .gko, .gm1
+    if (/^\.gl?\d+$/.test(ext)) {
+      const num = parseInt(ext.replace(/^\.gl?/, ""), 10);
+      if (!Number.isNaN(num) && num >= 2) { results.push(name); continue; }
+    }
+  }
+
+  results.sort();
+  return results;
 }
 
 /** Collect ALL files that look like drill files, to handle multi-file drill exports (e.g. Altium). */
@@ -123,6 +152,7 @@ export function classifyLayerNames(names: string[]): Classified {
     pickByContains(files, ["board", "outline"]);
 
   const drills = pickAllDrills(files);
+  const inner_copper = pickAllInnerCopper(files, top_copper, bottom_copper);
 
   return {
     top_copper,
@@ -133,5 +163,6 @@ export function classifyLayerNames(names: string[]): Classified {
     bottom_silk,
     outline,
     drills: drills.length ? drills : undefined,
+    inner_copper: inner_copper.length ? inner_copper : undefined,
   };
 }
