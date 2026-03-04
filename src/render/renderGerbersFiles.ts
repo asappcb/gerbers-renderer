@@ -423,20 +423,26 @@ function buildLayerSvgWithPolarityMask(
       const x = p.x - w / 2;
       const y = p.y - h / 2;
 
+      // Rotation: Gerber Y-axis is flipped in SVG, so negate the angle
+      const rotDeg = op.rotationDeg;
+      const rotAttr = (rotDeg && Math.abs(rotDeg) > 0.01)
+        ? ` transform="rotate(${(-rotDeg).toFixed(2)},${p.x.toFixed(2)},${p.y.toFixed(2)})"`
+        : "";
+
       // Standard rect / obround
       if (op.shape === "R" || op.shape === "O") {
         // Fix obround: true obround has radius = min(w,h)/2
         const rx = op.shape === "O" ? Math.min(w, h) * 0.5 : 0;
-        return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" rx="${rx.toFixed(2)}" ry="${rx.toFixed(2)}" fill="${paintColor}" fill-opacity="1" />`;
+        return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" rx="${rx.toFixed(2)}" ry="${rx.toFixed(2)}" fill="${paintColor}" fill-opacity="1"${rotAttr} />`;
       }
 
       // Macro-ish rounded rect support: if cornerMm exists, draw rounded rect
       if (Number.isFinite(op.cornerMm) && (op.cornerMm ?? 0) > 0) {
         const rx = Math.max(0, (op.cornerMm as number) * pxPerMm);
-        return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" rx="${rx.toFixed(2)}" ry="${rx.toFixed(2)}" fill="${paintColor}" fill-opacity="1" />`;
+        return `<rect x="${x.toFixed(2)}" y="${y.toFixed(2)}" width="${w.toFixed(2)}" height="${h.toFixed(2)}" rx="${rx.toFixed(2)}" ry="${rx.toFixed(2)}" fill="${paintColor}" fill-opacity="1"${rotAttr} />`;
       }
 
-      // Fallback circle
+      // Fallback circle (rotation irrelevant for circles)
       const r = Math.max(1, Math.max(w, h) / 2);
       return `<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="${r.toFixed(2)}" fill="${paintColor}" fill-opacity="1" />`;
     }

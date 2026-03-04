@@ -112,8 +112,10 @@ export function classifyFiles(
  */
 function isDrillFile(lowerName: string): boolean {
   if (lowerName.endsWith(".drl")) return true;
-  if (lowerName.endsWith(".xlnt")) return true;
+  if (lowerName.endsWith(".xln")) return true;  // Excellon extension (was .xlnt, which is a typo)
   if (lowerName.includes("drill") || lowerName.includes("via")) return true;
+  // Altium NC drill naming: PCB-RoundHoles.TXT, PCB-SlotHoles.TXT, etc.
+  if (lowerName.endsWith(".txt") && (lowerName.includes("holes") || lowerName.includes("drill"))) return true;
   return false;
 }
 

@@ -20,6 +20,7 @@ export type Op = {
     widthMm?: number;
     heightMm?: number;
     cornerMm?: number;
+    rotationDeg?: number;
 } | {
     kind: "region";
     polarity: Polarity;
@@ -45,6 +46,7 @@ export interface GerberPrimitiveFlash {
     widthMm?: number;
     heightMm?: number;
     cornerMm?: number;
+    rotationDeg?: number;
     polarity: Polarity;
 }
 export interface GerberPrimitiveRegion {
