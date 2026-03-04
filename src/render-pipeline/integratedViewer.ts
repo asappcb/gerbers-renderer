@@ -274,58 +274,14 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
       enabled: (rc: RenderCtx) => !!boardGeom?.board?.mm_bounds,
       draw: (rc: RenderCtx) => {
         if (!boardGeom?.board?.mm_bounds) return;
-        
+
         const ctx = rc.ctx;
         const m = rc.xform.getWorldToScreenMatrix();
-        
-        // Set transform to draw in board coordinates
         ctx.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
-        
-        // Use outline mask for compositing if available
-        if (layers.top_board_mask || layers.bottom_board_mask) {
-          // Draw FR4 using outline mask as clipping mask
-          const outlineImg = new Image();
-          outlineImg.src = layers.top_board_mask || layers.bottom_board_mask || '';
-          
-          outlineImg.onload = () => {
-            // Draw FR4 background
-            if (!boardGeom?.board?.mm_bounds) return;
-            const bounds = boardGeom.board.mm_bounds;
-            const boardWidth = bounds.max_x_mm - bounds.min_x_mm;
-            const boardHeight = bounds.max_y_mm - bounds.min_y_mm;
-            
-            // First draw FR4 color
-            ctx.fillStyle = '#1a5f1a';
-            ctx.fillRect(bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
-            
-            // Then apply outline mask using compositing
-            ctx.globalCompositeOperation = 'destination-in';
-            ctx.drawImage(outlineImg, bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
-            ctx.globalCompositeOperation = 'source-over';
-            
-            // Add subtle border
-            ctx.strokeStyle = '#0d3d0d';
-            ctx.lineWidth = 0.1;
-            ctx.strokeRect(bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
-          };
-          
-          // Trigger image load if already complete
-          if (outlineImg.complete) {
-            (outlineImg.onload as (() => void))();
-          }
-        } else {
-          // Fallback: Draw simple rectangular FR4
-          const bounds = boardGeom.board.mm_bounds;
-          const boardWidth = bounds.max_x_mm - bounds.min_x_mm;
-          const boardHeight = bounds.max_y_mm - bounds.min_y_mm;
-          
-          ctx.fillStyle = '#1a5f1a';
-          ctx.fillRect(bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
-          
-          ctx.strokeStyle = '#0d3d0d';
-          ctx.lineWidth = 0.1;
-          ctx.strokeRect(bounds.min_x_mm, bounds.min_y_mm, boardWidth, boardHeight);
-        }
+
+        // Use synchronous clipping — never async compositing inside a render pass
+        const boardPath = buildBoardPath(ctx, boardGeom, 0.5);
+        drawFr4Clipped(ctx, boardPath);
       },
     };
   }
