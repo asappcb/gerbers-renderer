@@ -23,6 +23,7 @@ export type ViewerLayers = Partial<{
     bottom_mask: string;
     top_silk: string;
     bottom_silk: string;
+    inner_copper: string[];
     drills: string;
     vias: string;
     top_board_mask: string;

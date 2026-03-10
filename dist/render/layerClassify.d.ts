@@ -8,5 +8,7 @@ export type Classified = Partial<{
     /** All drill files found (supports multiple, e.g. Altium PTH + slots) */
     drills: string[];
     outline: string;
+    /** Inner copper layers, ordered (inner-1 nearest top, inner-N nearest bottom) */
+    inner_copper: string[];
 }>;
 export declare function classifyLayerNames(names: string[]): Classified;
