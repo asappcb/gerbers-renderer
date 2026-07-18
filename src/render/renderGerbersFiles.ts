@@ -1003,12 +1003,10 @@ export async function renderGerberSvgDocs(files: Record<string, Uint8Array>): Pr
 }
 
 /**
- * Browser render: produce blob-URL-backed layers + stackup for the viewer.
- * Thin wrapper over the pure `renderGerberSvgDocs` core.
+ * Wrap a pure SvgRenderResult into a blob-URL-backed RenderResult for the viewer.
+ * Shared by the direct browser path and the web-worker path.
  */
-export async function renderGerbersFiles(files: Record<string, Uint8Array>): Promise<RenderResult> {
-  const docs = await renderGerberSvgDocs(files);
-
+export function svgDocsToRenderResult(docs: SvgRenderResult): RenderResult {
   const urls: string[] = [];
   const urlById = new Map<string, string>();
   for (const [id, svg] of Object.entries(docs.svgById)) {
@@ -1058,4 +1056,12 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
     geometry: docs.geometry,
     revoke: () => urls.forEach((u) => URL.revokeObjectURL(u)),
   };
+}
+
+/**
+ * Browser render: produce blob-URL-backed layers + stackup for the viewer.
+ * Thin wrapper over the pure `renderGerberSvgDocs` core.
+ */
+export async function renderGerbersFiles(files: Record<string, Uint8Array>): Promise<RenderResult> {
+  return svgDocsToRenderResult(await renderGerberSvgDocs(files));
 }

@@ -1,7 +1,8 @@
 export { renderGerbersZip } from "./render/renderGerbersZip";
 export { renderGerbers } from "./render/renderGerbers";
-export { renderGerbersFiles, renderGerberSvgDocs } from "./render/renderGerbersFiles";
+export { renderGerbersFiles, renderGerberSvgDocs, svgDocsToRenderResult } from "./render/renderGerbersFiles";
 export type { SvgRenderResult, SvgCopperRef } from "./render/renderGerbersFiles";
+export { renderGerbersInWorker, disposeRenderWorker } from "./render/renderGerbersWorker";
 export type { BoardStackup, CopperLayer } from "./viewer/types";
 
 // Headless / CI render + SVG compositor

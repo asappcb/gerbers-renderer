@@ -65,6 +65,18 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
               </select>
             </div>
 
+            <div class="select" title="Board finish">
+              Finish
+              <select id="theme-select">
+                <option value="green" selected>Green</option>
+                <option value="blue">Blue</option>
+                <option value="red">Red</option>
+                <option value="black">Black</option>
+                <option value="white">White</option>
+                <option value="purple">Purple</option>
+              </select>
+            </div>
+
             <div class="layer-dropdown" id="layer-dropdown">
               <button class="btn" id="layer-menu-btn" type="button" title="Layer visibility">
                 <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:14px;height:14px"><path d="M1 4h14M3 8h10M5 12h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -117,6 +129,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   const canvas = mustGet<HTMLCanvasElement>(root, "#render-canvas");
   const gridToggle = mustGet<HTMLInputElement>(root, "#grid-toggle");
   const gridUnits = mustGet<HTMLSelectElement>(root, "#grid-units");
+  const themeSelect = mustGet<HTMLSelectElement>(root, "#theme-select");
   const fitBtn = mustGet<HTMLButtonElement>(root, "#fit-btn");
   const shareBtn = mustGet<HTMLButtonElement>(root, "#share-btn");
   const downloadBtn = showDownloadButton ? mustGet<HTMLButtonElement>(root, "#download-btn") : null;
@@ -270,6 +283,17 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   let layers: ViewerLayers = {};
   let stackup: BoardStackup | null = null;
   let geometry: BoardGeometry | null = null;
+
+  // Board finish theme — the substrate/soldermask colour (the visible board colour).
+  const BOARD_THEMES: Record<string, string> = {
+    green: "#1a5f1a",
+    blue: "#0b3d6b",
+    red: "#7a1420",
+    black: "#151515",
+    white: "#d8d8d8",
+    purple: "#3b1a5f",
+  };
+  let substrateColor = BOARD_THEMES.green;
   let sideMode: ViewerSideMode = "top";
   let didInteract = false;
   // Ids of layer passes registered on the last updateRenderPasses() (for teardown).
@@ -395,8 +419,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     ctx.save();
     ctx.clip(boardPath);
     
-    // Fill FR4 using the clipped path
-    ctx.fillStyle = '#1a5f1a';
+    // Fill the substrate (themed board finish colour) using the clipped path
+    ctx.fillStyle = substrateColor;
     ctx.fill(boardPath);
     
     // Add subtle border
@@ -693,6 +717,15 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     }
   });
 
+  function setBoardTheme(name: string) {
+    if (BOARD_THEMES[name]) {
+      substrateColor = BOARD_THEMES[name];
+      if (themeSelect.value !== name) themeSelect.value = name;
+      viewer.requestRender("board-theme");
+    }
+  }
+  themeSelect.addEventListener("change", () => setBoardTheme(themeSelect.value));
+
   fitBtn.addEventListener("click", () => fitBoardToViewport(0.08));
 
   shareBtn.addEventListener("click", async () => {
@@ -863,6 +896,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
       side: sideMode,
       revealed: revealedIds(),
       includeFR4: layerVisible["layer:fr4"] ?? true,
+      background: substrateColor,
       outerCopper: outer ? (layerVisible[outer.id] ?? true) : true,
       sideMask: layerVisible[`${sideMode}:mask`] ?? true,
       sideSilk: layerVisible[`${sideMode}:silk`] ?? true,
@@ -1423,6 +1457,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     markerPicker,
     getGeometry: () => geometry,
     getStats: () => geometry?.stats ?? null,
+    setBoardTheme,
     pickFeatureAt: (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect();
       const b = viewer.screenToBoard(clientX - rect.left, clientY - rect.top);

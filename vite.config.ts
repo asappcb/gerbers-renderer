@@ -20,6 +20,10 @@ export default defineConfig({
     },
     sourcemap: true,
   },
+  // The render worker is bundled as an ES module (UMD/IIFE can't code-split workers).
+  worker: {
+    format: "es",
+  },
   // Base path for GitHub Pages
   base: process.env.NODE_ENV === 'production' ? '/gerbers-renderer/' : '/',
 });
