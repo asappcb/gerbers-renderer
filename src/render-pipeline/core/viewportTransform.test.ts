@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { ViewportTransform, CameraState, Viewport, Vec2 } from "./viewportTransform";
-import { dfmToBoardCoordinates, adaptDfmPoint, isPointOffBoard, BoardBounds } from "../dfmCoordinateAdapter";
+import { dfmToBoardCoordinates, adaptDfmPoint, BoardBounds } from "../dfmCoordinateAdapter";
 
 function approx(a: number, b: number, eps = 1e-6) {
   expect(Math.abs(a - b)).toBeLessThanOrEqual(eps);
@@ -121,34 +121,35 @@ describe("DFM Coordinate Adapter", () => {
     maxY_mm: 14
   };
 
-  it("maps (minX, maxY) to (0, 0) after adapter", () => {
+  // The adapter maps absolute Gerber coords (Y up) to the renderer's world
+  // space: X is unchanged, Y is flipped about the board midline
+  // (world_y = minY + maxY - gerber_y). Coordinates stay absolute.
+
+  it("keeps X unchanged and maps Gerber maxY to world minY (top edge)", () => {
     const dfmPoint = { x_mm: testBounds.minX_mm, y_mm: testBounds.maxY_mm };
     const boardPoint = dfmToBoardCoordinates(dfmPoint, testBounds);
-    
-    approx(boardPoint.x_mm, 0);
-    approx(boardPoint.y_mm, 0);
+
+    approx(boardPoint.x_mm, testBounds.minX_mm);
+    approx(boardPoint.y_mm, testBounds.minY_mm);
   });
 
-  it("maps (minX, minY) to (0, height) after adapter", () => {
+  it("maps Gerber minY to world maxY (bottom edge)", () => {
     const dfmPoint = { x_mm: testBounds.minX_mm, y_mm: testBounds.minY_mm };
     const boardPoint = dfmToBoardCoordinates(dfmPoint, testBounds);
-    
-    const expectedHeight = testBounds.maxY_mm - testBounds.minY_mm;
-    approx(boardPoint.x_mm, 0);
-    approx(boardPoint.y_mm, expectedHeight);
+
+    approx(boardPoint.x_mm, testBounds.minX_mm);
+    approx(boardPoint.y_mm, testBounds.maxY_mm);
   });
 
-  it("maps (maxX, maxY) to (width, 0) after adapter", () => {
+  it("leaves X absolute (does not subtract minX)", () => {
     const dfmPoint = { x_mm: testBounds.maxX_mm, y_mm: testBounds.maxY_mm };
     const boardPoint = dfmToBoardCoordinates(dfmPoint, testBounds);
-    
-    const expectedWidth = testBounds.maxX_mm - testBounds.minX_mm;
-    approx(boardPoint.x_mm, expectedWidth);
-    approx(boardPoint.y_mm, 0);
+
+    approx(boardPoint.x_mm, testBounds.maxX_mm);
+    approx(boardPoint.y_mm, testBounds.minY_mm);
   });
 
-  it("random point roundtrip sanity: adapter output stays consistent with expected width/height", () => {
-    // Test several random points
+  it("keeps in-bounds points inside the absolute board bounds and flags out-of-bounds", () => {
     const testPoints = [
       { x_mm: 25, y_mm: 8 },
       { x_mm: 50, y_mm: -2 },
@@ -156,21 +157,19 @@ describe("DFM Coordinate Adapter", () => {
       { x_mm: 15, y_mm: 0 }
     ];
 
-    const boardWidth = testBounds.maxX_mm - testBounds.minX_mm;
-    const boardHeight = testBounds.maxY_mm - testBounds.minY_mm;
-
     for (const dfmPoint of testPoints) {
       const result = adaptDfmPoint(dfmPoint, testBounds);
-      
-      // Check that board coordinates are within expected ranges
-      expect(result.boardPoint.x_mm).toBeGreaterThanOrEqual(0);
-      expect(result.boardPoint.x_mm).toBeLessThanOrEqual(boardWidth);
-      expect(result.boardPoint.y_mm).toBeGreaterThanOrEqual(0);
-      expect(result.boardPoint.y_mm).toBeLessThanOrEqual(boardHeight);
-      
-      // Verify off-board detection works correctly
-      const isOffBoard = isPointOffBoard(result.boardPoint, testBounds);
-      expect(result.isOffBoard).toBe(isOffBoard);
+
+      // In absolute space, in-bounds inputs stay within absolute bounds.
+      expect(result.boardPoint.x_mm).toBeGreaterThanOrEqual(testBounds.minX_mm);
+      expect(result.boardPoint.x_mm).toBeLessThanOrEqual(testBounds.maxX_mm);
+      expect(result.boardPoint.y_mm).toBeGreaterThanOrEqual(testBounds.minY_mm);
+      expect(result.boardPoint.y_mm).toBeLessThanOrEqual(testBounds.maxY_mm);
+      expect(result.isOffBoard).toBe(false);
     }
+
+    // A point outside the board is flagged off-board.
+    const off = adaptDfmPoint({ x_mm: 200, y_mm: 8 }, testBounds);
+    expect(off.isOffBoard).toBe(true);
   });
 });

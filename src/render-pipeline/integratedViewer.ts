@@ -2,8 +2,8 @@ import "../viewer/viewer.css";
 import type { BoardGeom, ViewerLayers, ViewerSideMode } from '../viewer/types';
 import type { RenderCtx, OverlayApi, Marker as DfmMarker } from './core/renderContract';
 import { Viewer } from './viewer';
-import { VisibilityManager } from './visibilityManager';
-import { 
+import { dfmToBoardCoordinates } from './dfmCoordinateAdapter';
+import {
   OverlayRegistry, 
   MarkerRenderer, 
   SelectionRenderer,
@@ -108,27 +108,32 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     mirrorY: false, // Don't flip Y - board origin is top-left like screen
   });
 
-  const visibility = new VisibilityManager();
-  
+  // Use the viewer's own visibility manager — the one the render passes read
+  // from via rc.visibility — so toggles here actually affect what's drawn.
+  const visibility = viewer.getVisibilityManager();
+
   // Set up visibility change subscription to trigger renders
   visibility.subscribe(() => {
     viewer.requestRender("visibility-change");
   });
   const overlayRegistry = new OverlayRegistry();
   const markerRenderer = new MarkerRenderer();
-  const selectionRenderer = new SelectionRenderer();
+  // Give the selection renderer a way to look up a marker's board position so it
+  // can highlight the real marker instead of a fixed placeholder rectangle.
+  const selectionRenderer = new SelectionRenderer((id) => markerRenderer.get(id)?.position);
   let currentSelection: Selection | null = null;
 
-  // Set up canvas size
+  // Set up canvas size. The backing store is sized in CSS pixels (not scaled by
+  // devicePixelRatio) so that the world→screen transform each pass applies fills
+  // the whole canvas and picking uses the same coordinate space as rendering.
   function resizeCanvas() {
     const rect = viewport.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
+
+    canvas.width = Math.max(1, Math.round(rect.width));
+    canvas.height = Math.max(1, Math.round(rect.height));
     canvas.style.width = `${rect.width}px`;
     canvas.style.height = `${rect.height}px`;
-    
+
     viewer.requestRender("resize");
   }
 
@@ -153,11 +158,9 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
       // Lower the density threshold to make grid more visible
       if (minorScreen < 2) return; // Reduced from 6 to 2
       
-      // Get viewport bounds in board coordinates
-      const cssW = canvas.width / (window.devicePixelRatio || 1);
-      const cssH = canvas.height / (window.devicePixelRatio || 1);
+      // Get viewport bounds in board coordinates (canvas is sized in CSS px)
       const topLeft = helpers.screenToBoard({ x: 0, y: 0 });
-      const bottomRight = helpers.screenToBoard({ x: cssW, y: cssH });
+      const bottomRight = helpers.screenToBoard({ x: canvas.width, y: canvas.height });
       
       // Draw in screen space for crisp lines
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -311,49 +314,6 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
         drawFr4Clipped(ctx, boardPath);
       },
     };
-  }
-
-  // Parse actual outline geometry from SVG mask to get real board shape
-  function parseOutlineGeometry(maskSvg: string): Path2D | null {
-    try {
-      // Extract the path data from the SVG mask
-      const pathMatch = maskSvg.match(/<path[^>]*d="([^"]*)"/);
-      if (pathMatch) {
-        const pathData = pathMatch[1];
-        const parser = new Path2D();
-        // Simple path parsing - this could be enhanced for full SVG parsing
-        const commands = pathData.split(/([MmLlHhVvCcSsQqAaZz])/);
-        let x = 0, y = 0;
-        
-        for (let i = 0; i < commands.length; i++) {
-          const cmd = commands[i];
-          if (cmd === 'M') {
-            // Move to
-            const coords = commands[++i]?.split(/[\s,]+/);
-            if (coords && coords.length >= 2) {
-              x = parseFloat(coords[0]);
-              y = parseFloat(coords[1]);
-              parser.moveTo(x, y);
-            }
-          } else if (cmd === 'L') {
-            // Line to
-            const coords = commands[++i]?.split(/[\s,]+/);
-            if (coords && coords.length >= 2) {
-              x = parseFloat(coords[0]);
-              y = parseFloat(coords[1]);
-              parser.lineTo(x, y);
-            }
-          } else if (cmd === 'Z') {
-            parser.closePath();
-          }
-        }
-        return parser;
-      }
-    } catch (e) {
-      console.warn('Failed to parse outline geometry:', e);
-      return null;
-    }
-    return null;
   }
 
   // Build board silhouette path from actual outline loops (preferred) or bounding box fallback.
@@ -568,24 +528,20 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     // Calculate the world position under the mouse before zoom
     const worldPosBefore = viewer.screenToBoard(mouseX, mouseY);
     
-    // Apply new zoom
+    // Apply new zoom, then read the world position under the mouse at that zoom.
     viewer.setCamera({ zoom: newZoom });
-    
-    // Calculate the world position under the mouse after zoom
     const worldPosAfter = viewer.screenToBoard(mouseX, mouseY);
-    
-    // Adjust camera center to keep the world position under mouse fixed
+
+    // Adjust camera center to keep the world position under the mouse fixed.
+    // Zoom is already set above, so only the center needs updating here.
     const deltaX = worldPosBefore.x - worldPosAfter.x;
     const deltaY = worldPosBefore.y - worldPosAfter.y;
-    
-    const newCenter = {
-      x: currentCamera.center_mm.x + deltaX,
-      y: currentCamera.center_mm.y + deltaY,
-    };
-    
+
     viewer.setCamera({
-      center_mm: newCenter,
-      zoom: newZoom,
+      center_mm: {
+        x: currentCamera.center_mm.x + deltaX,
+        y: currentCamera.center_mm.y + deltaY,
+      },
     });
   }, { passive: false });
 
@@ -658,12 +614,13 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     layerMenuBtn.classList.toggle("active", !open);
   });
   // Close on outside click
-  document.addEventListener("click", (e) => {
+  const onDocumentClick = (e: MouseEvent) => {
     if (!layerPanel.hidden && !layerPanel.contains(e.target as Node) && e.target !== layerMenuBtn) {
       layerPanel.hidden = true;
       layerMenuBtn.classList.remove("active");
     }
-  });
+  };
+  document.addEventListener("click", onDocumentClick);
 
   radios.forEach((r) => {
     r.addEventListener("change", () => {
@@ -672,10 +629,11 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     });
   });
 
-  window.addEventListener("resize", () => {
+  const onWindowResize = () => {
     resizeCanvas();
     if (!didInteract) fitBoardToViewport(0.08);
-  });
+  };
+  window.addEventListener("resize", onWindowResize);
 
   function mustGet<T extends HTMLElement>(root: HTMLElement, selector: string): T {
     const el = root.querySelector(selector);
@@ -709,9 +667,25 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     updateRenderPasses();
   }
 
+  // Convert a marker's absolute Gerber coords (Y up) into the renderer's world
+  // space (Y flipped), matching how the layer images are placed. Without this,
+  // markers land mirrored/offset relative to the board.
+  function gerberToWorldPos(x_mm: number, y_mm: number): { x: number; y: number } {
+    const b = boardGeom?.board?.mm_bounds;
+    if (!b) return { x: x_mm, y: y_mm };
+    const p = dfmToBoardCoordinates(
+      { x_mm, y_mm },
+      { minX_mm: b.min_x_mm, minY_mm: b.min_y_mm, maxX_mm: b.max_x_mm, maxY_mm: b.max_y_mm }
+    );
+    return { x: p.x_mm, y: p.y_mm };
+  }
+
   function dispose() {
     window.removeEventListener("mousemove", onMove);
     window.removeEventListener("mouseup", onUp);
+    window.removeEventListener("resize", onWindowResize);
+    document.removeEventListener("click", onDocumentClick);
+    viewer.dispose();
     host.innerHTML = "";
   }
 
@@ -748,7 +722,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
       // Convert DFM marker to render marker
       const renderMarker: RenderMarker = {
         id: marker.id,
-        position: { x: marker.x_mm, y: marker.y_mm },
+        position: gerberToWorldPos(marker.x_mm, marker.y_mm),
         type: 'custom', // Default type for DFM markers
         data: {
           ...marker.data,

@@ -19,7 +19,13 @@ export class VisibilityManager {
   }
 
   getState(): VisibilityState {
-    return { ...this.state };
+    // Deep-copy the nested objects so handed-out snapshots don't mutate when
+    // setGerberVisibility/setOverlayVisibility change state in place.
+    return {
+      gerber: { ...this.state.gerber },
+      overlays: { ...this.state.overlays },
+      markers: this.state.markers,
+    };
   }
 
   setState(updates: Partial<VisibilityState>) {

@@ -220,17 +220,24 @@ export interface Selection {
 }
 
 export class SelectionRenderer {
+  /**
+   * @param getMarkerPosition optional lookup returning a marker's board-space
+   *   position (mm) by id, so a marker selection can be highlighted where the
+   *   marker actually is.
+   */
+  constructor(private getMarkerPosition?: (id: string) => { x: number; y: number } | undefined) {}
+
   draw(rc: RenderCtx, selection: Selection | null) {
     if (!selection) return;
 
     const ctx = rc.ctx;
-    
+
     switch (selection.type) {
       case 'marker':
         this.drawMarkerSelection(ctx, rc, selection.id);
         break;
       case 'geometry':
-        this.drawGeometrySelection(ctx, rc, selection.id);
+        // No geometry registry is wired up; nothing to highlight.
         break;
       case 'region':
         this.drawRegionSelection(ctx, rc, selection.bounds);
@@ -239,20 +246,18 @@ export class SelectionRenderer {
   }
 
   private drawMarkerSelection(ctx: CanvasRenderingContext2D, rc: RenderCtx, markerId?: string) {
-    // This would highlight a specific marker
-    // For now, draw a generic highlight
+    if (!markerId || !this.getMarkerPosition) return;
+    const pos = this.getMarkerPosition(markerId);
+    if (!pos) return;
+
+    // Highlight the marker where it actually sits (screen space).
+    const screen = rc.boardToScreen(pos);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.strokeStyle = 'yellow';
     ctx.lineWidth = 2;
-    ctx.strokeRect(10, 10, 100, 100);
-  }
-
-  private drawGeometrySelection(ctx: CanvasRenderingContext2D, rc: RenderCtx, geometryId?: string) {
-    // This would highlight specific geometry
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.strokeStyle = 'cyan';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(120, 10, 100, 100);
+    ctx.beginPath();
+    ctx.arc(screen.x, screen.y, 12, 0, Math.PI * 2);
+    ctx.stroke();
   }
 
   private drawRegionSelection(ctx: CanvasRenderingContext2D, rc: RenderCtx, bounds?: { min: { x: number; y: number }; max: { x: number; y: number } }) {

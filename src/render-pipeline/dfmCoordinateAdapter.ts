@@ -30,9 +30,12 @@ export interface BoardPoint {
  * @returns Board point in renderer coordinates (+Y down)
  */
 export function dfmToBoardCoordinates(dfmPoint: DfmPoint, bounds: BoardBounds): BoardPoint {
+  // The renderer works in absolute Gerber-space mm and flips Y for display
+  // (world_y = minY + maxY - gerber_y). X is left unchanged. Markers must use
+  // the exact same mapping as the layer images or they land in the wrong place.
   return {
-    x_mm: dfmPoint.x_mm - bounds.minX_mm,
-    y_mm: bounds.maxY_mm - dfmPoint.y_mm,
+    x_mm: dfmPoint.x_mm,
+    y_mm: bounds.minY_mm + bounds.maxY_mm - dfmPoint.y_mm,
   };
 }
 
@@ -44,13 +47,12 @@ export function dfmToBoardCoordinates(dfmPoint: DfmPoint, bounds: BoardBounds): 
  * @returns true if the point is outside the board outline
  */
 export function isPointOffBoard(boardPoint: BoardPoint, bounds: BoardBounds): boolean {
-  const boardWidth = bounds.maxX_mm - bounds.minX_mm;
-  const boardHeight = bounds.maxY_mm - bounds.minY_mm;
-  
-  return boardPoint.x_mm < 0 || 
-         boardPoint.x_mm > boardWidth || 
-         boardPoint.y_mm < 0 || 
-         boardPoint.y_mm > boardHeight;
+  // boardPoint is in absolute Gerber-space mm (see dfmToBoardCoordinates), so
+  // compare against the absolute bounds, not a 0-based width/height.
+  return boardPoint.x_mm < bounds.minX_mm ||
+         boardPoint.x_mm > bounds.maxX_mm ||
+         boardPoint.y_mm < bounds.minY_mm ||
+         boardPoint.y_mm > bounds.maxY_mm;
 }
 
 /**

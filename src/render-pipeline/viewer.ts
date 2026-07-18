@@ -17,6 +17,7 @@ export class Viewer {
   private scheduler: RenderScheduler;
   private overlays = new OverlayRegistry();
   private overlayApi: OverlayApi;
+  private resizeObserver: ResizeObserver | null = null;
   private boardBounds = { minX_mm: 0, minY_mm: 0, maxX_mm: 100, maxY_mm: 100 }; // Default bounds
   
   // Marker system
@@ -55,10 +56,11 @@ export class Viewer {
     if (!ctx) throw new Error('Unable to get 2D context');
     this.ctx = ctx;
 
-    const rect = canvas.getBoundingClientRect();
+    // Viewport is the canvas backing store (sized in CSS px by the host),
+    // consistent with render()/createRenderCtx().
     const viewport: Viewport = {
-      width_px: rect.width,
-      height_px: rect.height
+      width_px: canvas.width,
+      height_px: canvas.height
     };
 
     this.xform = new ViewportTransform(initialCamera, viewport);
@@ -95,10 +97,23 @@ export class Viewer {
   }
 
   private setupResizeHandling() {
-    const resizeObserver = new ResizeObserver(() => {
+    this.resizeObserver = new ResizeObserver(() => {
       this.requestRender("canvas-resize");
     });
-    resizeObserver.observe(this.canvas);
+    this.resizeObserver.observe(this.canvas);
+  }
+
+  /** Tear down observers and cancel any pending frame. Call when removing the viewer. */
+  dispose() {
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    this.scheduler.cancel();
+    this.passes = [];
+  }
+
+  /** The single visibility manager the render passes read from. */
+  getVisibilityManager(): VisibilityManager {
+    return this.visibility;
   }
 
   private registerDefaultPasses() {
@@ -134,11 +149,11 @@ export class Viewer {
     const ctx = this.ctx;
     const canvas = this.canvas;
 
-    // Ensure viewport matches canvas CSS size
-    const rect = canvas.getBoundingClientRect();
-    const viewport = { width_px: rect.width, height_px: rect.height };
-
-    // Update transform viewport if needed
+    // The viewport is the canvas backing store, in the same pixel space every
+    // pass draws into. Keeping this consistent with createRenderCtx() means
+    // picking uses the exact transform rendering did. (The backing store is
+    // sized in CSS pixels by the host, so screen px == board-projected px.)
+    const viewport = { width_px: canvas.width, height_px: canvas.height };
     this.xform.setViewport(viewport);
 
     const rc: RenderCtx = {
@@ -157,13 +172,9 @@ export class Viewer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Scale for device pixel ratio for crisp rendering
-    const dpr = window.devicePixelRatio || 1;
-    ctx.scale(dpr, dpr);
-
-    // Optional: fill background
+    // Fill background
     ctx.fillStyle = '#f5f5f5';
-    ctx.fillRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // Execute all passes in order
     for (const pass of this.passes) {

@@ -123,7 +123,9 @@ export class ViewportTransform {
   }
 
   getCamera(): Required<CameraState> {
-    return this.camera;
+    // Return a copy so callers can't mutate internal camera state, and so
+    // previously-returned snapshots don't change under them.
+    return { ...this.camera, center_mm: { ...this.camera.center_mm } };
   }
 
   getViewport(): Viewport {

@@ -64,12 +64,15 @@ export function addDfmViolationsToRenderer(
   boardBounds: BoardBounds
 ) {
   const markers = convertDfmViolationsToMarkers(violations, boardBounds);
-  
-  // Clear existing markers if needed
-  // markerRenderer.clear();
-  
-  // Add new markers
+
+  // The integrated viewer's MarkerRenderer stores markers by board-space
+  // `position`, not `{x_mm, y_mm}`. Map to that shape so they actually render.
   markers.forEach(marker => {
-    markerRenderer.add(marker);
+    markerRenderer.add({
+      id: marker.id,
+      position: { x: marker.x_mm, y: marker.y_mm },
+      type: 'custom',
+      data: marker.data,
+    });
   });
 }
