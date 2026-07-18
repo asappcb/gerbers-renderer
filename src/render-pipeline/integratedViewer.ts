@@ -17,6 +17,7 @@ import { createMarkerPass } from './markerPass';
 import { SelectionRenderer, createSelectionPass, type Selection } from './renderPasses';
 import { Emitter } from './events';
 import type { ViewerEvents } from './viewerEvents';
+import type { Board3DHandle } from './board3d';
 
 export type IntegratedViewerOptions = {
   onDownload?: () => void;
@@ -105,6 +106,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
             </div>
 
             <button class="btn" id="fit-btn" type="button" title="Fit to viewport">Fit</button>
+            <button class="btn" id="view3d-btn" type="button" title="Toggle 3D view">3D</button>
             <button class="btn" id="share-btn" type="button" title="Copy shareable link">Share</button>${showDownloadButton ? `
             <button class="btn btn-primary" id="download-btn" type="button" title="Download">
               ${downloadIcon}
@@ -132,6 +134,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   const themeSelect = mustGet<HTMLSelectElement>(root, "#theme-select");
   const fitBtn = mustGet<HTMLButtonElement>(root, "#fit-btn");
   const shareBtn = mustGet<HTMLButtonElement>(root, "#share-btn");
+  const view3dBtn = mustGet<HTMLButtonElement>(root, "#view3d-btn");
   const downloadBtn = showDownloadButton ? mustGet<HTMLButtonElement>(root, "#download-btn") : null;
   const radios = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="side"]'));
   const layerMenuBtn = mustGet<HTMLButtonElement>(root, "#layer-menu-btn");
@@ -734,6 +737,32 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     shareBtn.textContent = "Copied!";
     setTimeout(() => { shareBtn.textContent = prev; }, 1200);
   });
+
+  // --- 3D view (B3, optional three.js peer dep) ---
+  let board3d: Board3DHandle | null = null;
+  async function toggle3D() {
+    if (board3d) {
+      board3d.dispose();
+      board3d = null;
+      canvas.style.display = "";
+      view3dBtn.classList.remove("active");
+      return;
+    }
+    if (!boardGeom || !stackup) return;
+    view3dBtn.disabled = true;
+    try {
+      const { createBoard3D } = await import("./board3d");
+      canvas.style.display = "none";
+      board3d = await createBoard3D(viewport, { boardGeom, stackup, substrateColor });
+      view3dBtn.classList.add("active");
+    } catch (err) {
+      console.error("3D view unavailable (is `three` installed?):", err);
+      canvas.style.display = "";
+    } finally {
+      view3dBtn.disabled = false;
+    }
+  }
+  view3dBtn.addEventListener("click", () => { toggle3D(); });
   downloadBtn?.addEventListener("click", () => opts.onDownload?.());
 
   layerMenuBtn.addEventListener("click", (e) => {
@@ -806,6 +835,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
 
   const onWindowResize = () => {
     resizeCanvas();
+    if (board3d) board3d.resize();
     if (!didInteract) fitBoardToViewport(0.08);
   };
   window.addEventListener("resize", onWindowResize);
@@ -1252,6 +1282,54 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   };
   viewer.addPass(netPass);
 
+  // --- Crisp vector copper (B1) ---
+  // When zoomed in past the raster resolution, redraw copper pads/traces from the
+  // parsed geometry with Path2D so edges stay sharp. Regions/planes stay raster.
+
+  const CRISP_ZOOM = 12; // px/mm; below this the raster is already fine
+  function copperColorFor(layerId: string): string {
+    return stackup?.copper.find((c) => c.id === layerId)?.color ?? "#fbbf24";
+  }
+  const vectorCopperPass = {
+    id: "vector-copper",
+    order: 12, // over the copper raster, under mask/silk/drills
+    enabled: (rc: RenderCtx) => !!geometry && rc.xform.getCamera().zoom > CRISP_ZOOM,
+    draw: (rc: RenderCtx) => {
+      if (!geometry) return;
+      const active = activeCopperLayerIds();
+      const m = rc.xform.getWorldToScreenMatrix();
+      const ctx = rc.ctx;
+      ctx.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
+      ctx.lineCap = "round";
+      let curColor = "";
+      for (const f of geometry.features) {
+        if (f.kind === "hole" || !active.has(f.layer)) continue;
+        const color = copperColorFor(f.layer);
+        if (color !== curColor) { ctx.fillStyle = color; ctx.strokeStyle = color; curColor = color; }
+        if (f.kind === "pad") {
+          if (f.shape === "C") {
+            ctx.beginPath();
+            ctx.arc(f.x_mm, f.y_mm, Math.max(f.w_mm, f.h_mm) / 2, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (f.shape === "O" && typeof (ctx as any).roundRect === "function") {
+            ctx.beginPath();
+            (ctx as any).roundRect(f.x_mm - f.w_mm / 2, f.y_mm - f.h_mm / 2, f.w_mm, f.h_mm, Math.min(f.w_mm, f.h_mm) / 2);
+            ctx.fill();
+          } else {
+            ctx.fillRect(f.x_mm - f.w_mm / 2, f.y_mm - f.h_mm / 2, f.w_mm, f.h_mm);
+          }
+        } else {
+          ctx.lineWidth = f.width_mm;
+          ctx.beginPath();
+          ctx.moveTo(f.x1_mm, f.y1_mm);
+          ctx.lineTo(f.x2_mm, f.y2_mm);
+          ctx.stroke();
+        }
+      }
+    },
+  };
+  viewer.addPass(vectorCopperPass);
+
   // --- Revision diff overlay (M4) ---
 
   let diffState: { result: DiffResult; topImg?: HTMLImageElement; bottomImg?: HTMLImageElement } | null = null;
@@ -1421,6 +1499,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     window.removeEventListener("mouseup", onUp);
     window.removeEventListener("resize", onWindowResize);
     document.removeEventListener("click", onDocumentClick);
+    board3d?.dispose();
+    board3d = null;
     viewer.dispose();
     host.innerHTML = "";
   }
@@ -1458,6 +1538,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     getGeometry: () => geometry,
     getStats: () => geometry?.stats ?? null,
     setBoardTheme,
+    toggle3D,
     pickFeatureAt: (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect();
       const b = viewer.screenToBoard(clientX - rect.left, clientY - rect.top);
