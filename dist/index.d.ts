@@ -1,6 +1,14 @@
 export { renderGerbersZip } from './render/renderGerbersZip';
 export { renderGerbers } from './render/renderGerbers';
-export { renderGerbersFiles } from './render/renderGerbersFiles';
+export { renderGerbersFiles, renderGerberSvgDocs } from './render/renderGerbersFiles';
+export type { SvgRenderResult, SvgCopperRef } from './render/renderGerbersFiles';
+export type { BoardStackup, CopperLayer } from './viewer/types';
+export { composeStackToSvg, renderGerbersToSvg, renderGerbersToImage, } from './render/headless';
+export type { ComposeOptions, ImageOptions, SvgRasterizer, HeadlessInput, } from './render/headless';
+export { diffGerbers, computeDiffAlignment } from './render/diff';
+export type { DiffResult, DiffSide, DiffOptions, DiffInput, DiffAlignment } from './render/diff';
+export { encodeViewState, decodeViewState } from './render-pipeline/viewState';
+export type { ViewState } from './render-pipeline/viewState';
 export { detectGerberBundle } from './core/detect';
 export type { RenderResult } from './render/renderGerbersFiles';
 export type { BoardGeom, ViewerLayers, ViewerSideMode } from './viewer/types';

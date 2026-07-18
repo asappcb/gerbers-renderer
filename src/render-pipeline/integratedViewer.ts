@@ -1,8 +1,12 @@
 import "../viewer/viewer.css";
-import type { BoardGeom, ViewerLayers, ViewerSideMode } from '../viewer/types';
+import type { BoardGeom, ViewerLayers, ViewerSideMode, BoardStackup, CopperLayer } from '../viewer/types';
 import type { RenderCtx, OverlayApi, Marker as DfmMarker } from './core/renderContract';
 import { Viewer } from './viewer';
 import { dfmToBoardCoordinates } from './dfmCoordinateAdapter';
+import { composeStackToSvg } from '../render/headless';
+import type { SvgRenderResult } from '../render/renderGerbersFiles';
+import type { DiffResult } from '../render/diff';
+import { encodeViewState, decodeViewState, type ViewState } from './viewState';
 import {
   OverlayRegistry, 
   MarkerRenderer, 
@@ -71,7 +75,20 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
               <div class="layer-panel" id="layer-panel" hidden></div>
             </div>
 
-            <button class="btn" id="fit-btn" type="button" title="Fit to viewport">Fit</button>${showDownloadButton ? `
+            <div class="layer-dropdown" id="export-dropdown">
+              <button class="btn" id="export-menu-btn" type="button" title="Export image">
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:14px;height:14px"><path d="M8 1v9M4.5 6.5L8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Export
+              </button>
+              <div class="layer-panel" id="export-panel" hidden>
+                <button class="export-item" type="button" data-export="png-view">PNG — current view</button>
+                <button class="export-item" type="button" data-export="png-board">PNG — full board</button>
+                <button class="export-item" type="button" data-export="svg-board">SVG — full board</button>
+              </div>
+            </div>
+
+            <button class="btn" id="fit-btn" type="button" title="Fit to viewport">Fit</button>
+            <button class="btn" id="share-btn" type="button" title="Copy shareable link">Share</button>${showDownloadButton ? `
             <button class="btn btn-primary" id="download-btn" type="button" title="Download">
               ${downloadIcon}
               Download
@@ -95,10 +112,13 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   const gridToggle = mustGet<HTMLInputElement>(root, "#grid-toggle");
   const gridUnits = mustGet<HTMLSelectElement>(root, "#grid-units");
   const fitBtn = mustGet<HTMLButtonElement>(root, "#fit-btn");
+  const shareBtn = mustGet<HTMLButtonElement>(root, "#share-btn");
   const downloadBtn = showDownloadButton ? mustGet<HTMLButtonElement>(root, "#download-btn") : null;
   const radios = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="side"]'));
   const layerMenuBtn = mustGet<HTMLButtonElement>(root, "#layer-menu-btn");
   const layerPanel = mustGet<HTMLDivElement>(root, "#layer-panel");
+  const exportMenuBtn = mustGet<HTMLButtonElement>(root, "#export-menu-btn");
+  const exportPanel = mustGet<HTMLDivElement>(root, "#export-panel");
 
   // Initialize render pipeline
   const viewer = new Viewer(canvas, {
@@ -226,27 +246,29 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   viewer.addPass(createMarkerPass(markerRenderer));
   viewer.addPass(createSelectionPass(selectionRenderer, () => currentSelection));
 
-  // Per-pass visibility (true by default)
+  // Per-pass visibility (true by default; inner copper defaults to hidden)
   const layerVisible: Record<string, boolean> = {};
 
-  const LAYER_META: Record<string, { label: string; color: string }> = {
-    'layer:fr4':            { label: 'FR4 substrate',     color: '#1a5f1a' },
-    'layer:top-copper':     { label: 'Top copper',        color: '#fbbf24' },
-    'layer:top-mask':       { label: 'Top soldermask',    color: '#fde68a' },
-    'layer:top-silk':       { label: 'Top silkscreen',    color: '#f1f5f9' },
-    'layer:bottom-copper':  { label: 'Bottom copper',     color: '#38bdf8' },
-    'layer:bottom-mask':    { label: 'Bottom soldermask', color: '#bae6fd' },
-    'layer:bottom-silk':    { label: 'Bottom silkscreen', color: '#f1f5f9' },
-    'layer:drills':         { label: 'Drill holes',       color: '#111111' },
+  // Layer metadata (label + swatch color), populated dynamically from the stackup.
+  const layerMeta: Record<string, { label: string; color: string }> = {
+    'layer:fr4':    { label: 'FR4 substrate', color: '#1a5f1a' },
+    'layer:drills': { label: 'Drill holes',   color: '#111111' },
+    'layer:vias':   { label: 'Vias',          color: '#111111' },
   };
-  // Inner layer colors (cycled if >5 inner layers)
+  // Inner layer colors (cycled if >5 inner layers) — used when deriving a
+  // stackup from legacy flat layers.
   const INNER_LAYER_COLORS = ['#a78bfa', '#34d399', '#fb923c', '#60a5fa', '#f472b6'];
 
   // State
   let boardGeom: BoardGeom | null = null;
   let layers: ViewerLayers = {};
+  let stackup: BoardStackup | null = null;
   let sideMode: ViewerSideMode = "top";
   let didInteract = false;
+  // Ids of layer passes registered on the last updateRenderPasses() (for teardown).
+  let registeredLayerPassIds: string[] = [];
+  // Whether a shared #gv= view state has been applied (only on first load).
+  let hashApplied = false;
 
   // Layer images as render passes with board clipping
   function createImagePass(id: string, order: number, imageUrl: string | undefined) {
@@ -385,54 +407,72 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     ctx.restore();
   }
 
-  function updateRenderPasses() {
-    // Clear existing layer passes (fixed + any previously registered inner layers)
-    const existingPasses = [
-      "layer:fr4", "layer:top-copper", "layer:bottom-copper",
-      "layer:top-mask", "layer:bottom-mask", "layer:top-silk",
-      "layer:bottom-silk", "layer:drills", "layer:vias",
-      ...Object.keys(layerVisible).filter((id) => id.startsWith("layer:inner-")),
-    ];
-    existingPasses.forEach((id) => viewer.removePass(id));
+  const isInnerId = (id: string) => id.startsWith("cu.in");
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-    if (!boardGeom) return;
-
-    // Add layer passes in correct order
-    const layerConfigs: Array<{ id: string; order: number; url?: string; useFR4?: boolean }> = [
-      { id: "layer:fr4",           order:  5, useFR4: true },
-      { id: "layer:bottom-copper", order: 10, url: sideMode === "bottom" ? layers.bottom_copper : undefined },
-      { id: "layer:bottom-mask",   order: 15, url: sideMode === "bottom" ? layers.bottom_mask   : undefined },
-      { id: "layer:bottom-silk",   order: 20, url: sideMode === "bottom" ? layers.bottom_silk   : undefined },
-      // Inner layers occupy orders 21..24 (registered dynamically below)
-      { id: "layer:top-copper",    order: 25, url: sideMode === "top"    ? layers.top_copper    : undefined },
-      { id: "layer:top-mask",      order: 30, url: sideMode === "top"    ? layers.top_mask      : undefined },
-      { id: "layer:top-silk",      order: 35, url: sideMode === "top"    ? layers.top_silk      : undefined },
-      { id: "layer:drills",        order: 40, url: layers.drills },
-      { id: "layer:vias",          order: 45, url: layers.vias },
-    ];
-
-    layerConfigs.forEach((config) => {
-      let pass;
-      if (config.useFR4) {
-        pass = createFR4Pass(config.id, config.order);
-      } else if (config.url) {
-        pass = createImagePass(config.id, config.order, config.url);
-      }
-      if (pass) viewer.addPass(pass);
+  /** Build a stackup from legacy flat layers, for callers using the old setData shape. */
+  function deriveStackup(l: ViewerLayers): BoardStackup {
+    const copper: CopperLayer[] = [];
+    if (l.top_copper) copper.push({ id: "cu.top", index: 0, role: "top", name: "Top", url: l.top_copper, color: "#fbbf24" });
+    (l.inner_copper ?? []).forEach((url, i) => {
+      copper.push({ id: `cu.in${i + 1}`, index: 0, role: "inner", name: `Inner ${i + 1}`, url, color: INNER_LAYER_COLORS[i % INNER_LAYER_COLORS.length] });
     });
+    if (l.bottom_copper) copper.push({ id: "cu.bottom", index: 0, role: "bottom", name: "Bottom", url: l.bottom_copper, color: "#38bdf8" });
+    copper.forEach((c, i) => { c.index = i; });
+    return {
+      copper,
+      top: { mask: l.top_mask, silk: l.top_silk, paste: l.top_paste },
+      bottom: { mask: l.bottom_mask, silk: l.bottom_silk, paste: l.bottom_paste },
+      drills: l.drills,
+      vias: l.vias,
+    };
+  }
 
-    // Inner copper layers (visible on both sides, between bottom and top copper)
-    if (layers.inner_copper) {
-      layers.inner_copper.forEach((url, idx) => {
-        const id = `layer:inner-${idx + 1}`;
-        LAYER_META[id] = {
-          label: `Inner ${idx + 1}`,
-          color: INNER_LAYER_COLORS[idx % INNER_LAYER_COLORS.length],
-        };
-        const pass = createImagePass(id, 21 + idx, url); // orders 21, 22, 23…
-        if (pass) viewer.addPass(pass);
-      });
-    }
+  function updateRenderPasses() {
+    // Remove the layer passes registered on the previous pass build.
+    registeredLayerPassIds.forEach((id) => viewer.removePass(id));
+    registeredLayerPassIds = [];
+
+    if (!boardGeom || !stackup) return;
+
+    const register = (
+      id: string,
+      order: number,
+      url: string | undefined,
+      opts?: { fr4?: boolean; meta?: { label: string; color: string } }
+    ) => {
+      const fr4 = !!opts?.fr4;
+      if (!fr4 && !url) return;
+      if (opts?.meta) layerMeta[id] = opts.meta;
+      // Inner copper is hidden by default (reveal on demand); everything else shown.
+      if (!(id in layerVisible)) layerVisible[id] = !isInnerId(id);
+      const pass = fr4 ? createFR4Pass(id, order) : createImagePass(id, order, url);
+      if (pass) { viewer.addPass(pass); registeredLayerPassIds.push(id); }
+    };
+
+    register("layer:fr4", 5, undefined, { fr4: true });
+
+    // Only the current side's outer copper + its mask/silk/paste are shown by
+    // default; inner and opposite-side copper are revealed on demand.
+    const side = sideMode;
+    const outer = stackup.copper.find((c) => c.role === (side === "top" ? "top" : "bottom"));
+    if (outer) register(outer.id, 10, outer.url, { meta: { label: `${outer.name} copper`, color: outer.color } });
+
+    const extras = side === "top" ? stackup.top : stackup.bottom;
+    if (extras?.mask) register(`${side}:mask`, 15, extras.mask, { meta: { label: `${cap(side)} soldermask`, color: side === "top" ? "#fde68a" : "#bae6fd" } });
+
+    // Inner copper — registered but hidden by default; the layer panel reveals them.
+    // Drawn above the current-side copper (and mask) but below silk for inspection.
+    // Orders 20..59 leave room for up to ~40 inner layers before reaching silk.
+    stackup.copper
+      .filter((c) => c.role === "inner")
+      .forEach((c, idx) => register(c.id, 20 + idx, c.url, { meta: { label: c.name, color: c.color } }));
+
+    if (extras?.silk) register(`${side}:silk`, 60, extras.silk, { meta: { label: `${cap(side)} silkscreen`, color: "#f1f5f9" } });
+    if (extras?.paste) register(`${side}:paste`, 62, extras.paste, { meta: { label: `${cap(side)} paste`, color: "#cbd5e1" } });
+
+    register("layer:drills", 70, stackup.drills);
+    register("layer:vias", 75, stackup.vias);
 
     // Force an immediate render and another one shortly after to handle image loading
     viewer.requestRender("side-switch");
@@ -442,26 +482,10 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   }
 
   function rebuildLayerPanel() {
-    // Build display order dynamically, inserting inner layers between bottom and top copper
-    const innerIds = Object.keys(LAYER_META)
-      .filter((id) => id.startsWith("layer:inner-"))
-      .sort((a, b) => {
-        const na = parseInt(a.split("-").pop() || "0", 10);
-        const nb = parseInt(b.split("-").pop() || "0", 10);
-        return na - nb;
-      });
-
-    const LAYER_DISPLAY_ORDER = [
-      "layer:drills",
-      "layer:top-silk", "layer:top-mask", "layer:top-copper",
-      ...innerIds,
-      "layer:bottom-silk", "layer:bottom-mask", "layer:bottom-copper",
-      "layer:fr4",
-    ];
-
-    const active = LAYER_DISPLAY_ORDER.filter((id) => !!viewer.getPass(id));
-    layerPanel.innerHTML = active.map(id => {
-      const meta = LAYER_META[id] ?? { label: id, color: '#888' };
+    // Display top-of-stack first (reverse of render order).
+    const ids = [...registeredLayerPassIds].reverse();
+    layerPanel.innerHTML = ids.map((id) => {
+      const meta = layerMeta[id] ?? { label: id, color: '#888' };
       const checked = layerVisible[id] ?? true;
       const border = meta.color === '#f1f5f9' ? ' border:1px solid #cbd5e1;' : '';
       return `<label class="layer-item" data-layer-id="${id}">` +
@@ -605,6 +629,13 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   });
 
   fitBtn.addEventListener("click", () => fitBoardToViewport(0.08));
+
+  shareBtn.addEventListener("click", async () => {
+    await copyShareLink();
+    const prev = shareBtn.textContent;
+    shareBtn.textContent = "Copied!";
+    setTimeout(() => { shareBtn.textContent = prev; }, 1200);
+  });
   downloadBtn?.addEventListener("click", () => opts.onDownload?.());
 
   layerMenuBtn.addEventListener("click", (e) => {
@@ -614,10 +645,36 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     layerMenuBtn.classList.toggle("active", !open);
   });
   // Close on outside click
+  exportMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = !exportPanel.hidden;
+    exportPanel.hidden = open;
+    exportMenuBtn.classList.toggle("active", !open);
+  });
+  exportPanel.querySelectorAll<HTMLButtonElement>(".export-item").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      exportPanel.hidden = true;
+      exportMenuBtn.classList.remove("active");
+      const kind = btn.dataset.export;
+      try {
+        if (kind === "png-view") await exportPng("view");
+        else if (kind === "png-board") await exportPng("board");
+        else if (kind === "svg-board") await exportSvg();
+      } catch (err) {
+        console.error("Export failed:", err);
+      }
+    });
+  });
+
   const onDocumentClick = (e: MouseEvent) => {
-    if (!layerPanel.hidden && !layerPanel.contains(e.target as Node) && e.target !== layerMenuBtn) {
+    const t = e.target as Node;
+    if (!layerPanel.hidden && !layerPanel.contains(t) && e.target !== layerMenuBtn) {
       layerPanel.hidden = true;
       layerMenuBtn.classList.remove("active");
+    }
+    if (!exportPanel.hidden && !exportPanel.contains(t) && e.target !== exportMenuBtn) {
+      exportPanel.hidden = true;
+      exportMenuBtn.classList.remove("active");
     }
   };
   document.addEventListener("click", onDocumentClick);
@@ -641,10 +698,12 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     return el as T;
   }
 
-  function setData(data: { boardGeom: BoardGeom; layers: ViewerLayers }) {
+  function setData(data: { boardGeom: BoardGeom; layers: ViewerLayers; stackup?: BoardStackup }) {
     boardGeom = data.boardGeom;
     layers = data.layers;
-    
+    // Prefer the first-class stackup; derive one from legacy flat layers otherwise.
+    stackup = data.stackup ?? deriveStackup(data.layers);
+
     // Set board bounds for proper coordinate system using true Gerber-space bounds
     if (boardGeom?.board?.mm_bounds) {
       viewer.setBoardBounds({
@@ -658,6 +717,12 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     updateRenderPasses();
     resizeCanvas();
     fitBoardToViewport(0.08);
+
+    // On first load, restore a shared view (#gv=…) if present in the URL.
+    if (!hashApplied) {
+      hashApplied = true;
+      applyStateFromHash();
+    }
   }
 
   function setSideMode(mode: ViewerSideMode) {
@@ -670,6 +735,234 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   // Convert a marker's absolute Gerber coords (Y up) into the renderer's world
   // space (Y flipped), matching how the layer images are placed. Without this,
   // markers land mirrored/offset relative to the board.
+  // --- Image / SVG export (M3) ---
+
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function loadImageEl(url: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Failed to load composed SVG for export"));
+      img.src = url;
+    });
+  }
+
+  // Copper layers (besides the current outer) that the user has revealed.
+  function revealedIds(): string[] {
+    if (!stackup) return [];
+    const outer = stackup.copper.find((c) => c.role === (sideMode === "top" ? "top" : "bottom"));
+    return stackup.copper
+      .filter((c) => c.id !== outer?.id && (layerVisible[c.id] ?? false))
+      .map((c) => c.id);
+  }
+
+  // Compose options mirroring the current side + layer-panel visibility, so
+  // exports match what's on screen.
+  function composeOptsFromState() {
+    const outer = stackup?.copper.find((c) => c.role === (sideMode === "top" ? "top" : "bottom"));
+    return {
+      side: sideMode,
+      revealed: revealedIds(),
+      includeFR4: layerVisible["layer:fr4"] ?? true,
+      outerCopper: outer ? (layerVisible[outer.id] ?? true) : true,
+      sideMask: layerVisible[`${sideMode}:mask`] ?? true,
+      sideSilk: layerVisible[`${sideMode}:silk`] ?? true,
+      sidePaste: layerVisible[`${sideMode}:paste`] ?? true,
+      drills: layerVisible["layer:drills"] ?? true,
+    };
+  }
+
+  // Reconstruct the pure SVG document set from the viewer's blob-URL layers so
+  // we can reuse the headless composeStackToSvg() for crisp SVG/PNG export.
+  async function reconstructSvgDocs(): Promise<SvgRenderResult | null> {
+    if (!boardGeom || !stackup) return null;
+    const mm = boardGeom.board.mm_bounds;
+    const wMm = mm.max_x_mm - mm.min_x_mm;
+    const hMm = mm.max_y_mm - mm.min_y_mm;
+    const K = 1000 / 25.4; // px per mm, matches the render resolution
+    const wPx = Math.max(1, Math.round(wMm * K));
+    const hPx = Math.max(1, Math.round(hMm * K));
+
+    const svgById: Record<string, string> = {};
+    const jobs: Promise<void>[] = [];
+    const load = (id: string, url?: string): string | undefined => {
+      if (!url) return undefined;
+      jobs.push(fetch(url).then((r) => r.text()).then((t) => { svgById[id] = t; }));
+      return id;
+    };
+
+    const boardMaskId = load("board_mask", layers.top_board_mask);
+    const copper = stackup.copper.map((c) => ({
+      id: c.id, index: c.index, role: c.role, name: c.name, color: c.color,
+      svgId: load(c.id, c.url)!,
+    }));
+    const top = stackup.top
+      ? { maskId: load("top:mask", stackup.top.mask), silkId: load("top:silk", stackup.top.silk), pasteId: load("top:paste", stackup.top.paste) }
+      : undefined;
+    const bottom = stackup.bottom
+      ? { maskId: load("bottom:mask", stackup.bottom.mask), silkId: load("bottom:silk", stackup.bottom.silk), pasteId: load("bottom:paste", stackup.bottom.paste) }
+      : undefined;
+    const drillsId = load("drills", stackup.drills);
+
+    await Promise.all(jobs);
+
+    return {
+      boardGeom, bounds: { minX: mm.min_x_mm, minY: mm.min_y_mm, maxX: mm.max_x_mm, maxY: mm.max_y_mm },
+      wPx, hPx, svgById, boardMaskId, copper, top, bottom, drillsId, viasId: undefined,
+    };
+  }
+
+  async function exportSvg() {
+    const docs = await reconstructSvgDocs();
+    if (!docs) return;
+    const svg = composeStackToSvg(docs, composeOptsFromState());
+    downloadBlob(new Blob([svg], { type: "image/svg+xml" }), `board-${sideMode}.svg`);
+  }
+
+  async function exportPng(mode: "view" | "board" = "view", scale = 2) {
+    if (mode === "view") {
+      await new Promise<void>((resolve) => {
+        canvas.toBlob((b) => { if (b) downloadBlob(b, `board-${sideMode}-view.png`); resolve(); }, "image/png");
+      });
+      return;
+    }
+    const docs = await reconstructSvgDocs();
+    if (!docs) return;
+    const svg = composeStackToSvg(docs, composeOptsFromState());
+    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+    try {
+      const img = await loadImageEl(url);
+      const c = document.createElement("canvas");
+      // Clamp the longest side to MAX with a single factor so the aspect ratio holds.
+      const MAX = 8000;
+      const eff = Math.min(scale, MAX / Math.max(1, docs.wPx), MAX / Math.max(1, docs.hPx));
+      c.width = Math.max(1, Math.round(docs.wPx * eff));
+      c.height = Math.max(1, Math.round(docs.hPx * eff));
+      const ctx = c.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      await new Promise<void>((resolve) => {
+        c.toBlob((b) => { if (b) downloadBlob(b, `board-${sideMode}.png`); resolve(); }, "image/png");
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  // --- Shareable view state (M5) ---
+
+  function getViewState(): ViewState {
+    const cam = viewer.getCamera();
+    return {
+      v: 1,
+      side: sideMode,
+      cam: { x: cam.center_mm.x, y: cam.center_mm.y, zoom: cam.zoom, rot: cam.rotation_rad || 0 },
+      visible: { ...layerVisible },
+      grid: gridToggle.checked,
+      units: (gridUnits.value as "mm" | "in"),
+    };
+  }
+
+  function setViewState(s: ViewState) {
+    if (s.units) gridUnits.value = s.units;
+    if (typeof s.grid === "boolean") {
+      gridToggle.checked = s.grid;
+      gridOverlay.visible = s.grid;
+      visibility.setOverlayVisibility("grid", s.grid);
+    }
+    if (s.side) {
+      sideMode = s.side;
+      const r = radios.find((x) => x.value === s.side);
+      if (r) r.checked = true;
+    }
+    if (s.visible) Object.assign(layerVisible, s.visible);
+    updateRenderPasses();
+    if (s.cam) {
+      viewer.setCamera({ center_mm: { x: s.cam.x, y: s.cam.y }, zoom: s.cam.zoom, rotation_rad: s.cam.rot ?? 0 });
+    }
+    didInteract = true; // keep auto-fit from overriding a restored view
+    viewer.requestRender("view-state");
+  }
+
+  /** A shareable URL encoding the current side, camera, visibility, and grid. */
+  function getShareUrl(): string {
+    const url = new URL(location.href);
+    url.hash = `gv=${encodeViewState(getViewState())}`;
+    return url.toString();
+  }
+
+  async function copyShareLink(): Promise<string> {
+    const url = getShareUrl();
+    try { location.hash = new URL(url).hash; } catch { /* ignore */ }
+    try {
+      await navigator.clipboard?.writeText(url);
+    } catch {
+      /* clipboard may be unavailable; the URL is still in the address bar */
+    }
+    return url;
+  }
+
+  /** Apply a `#gv=…` view state from the current URL hash, if present. */
+  function applyStateFromHash(): boolean {
+    const m = /(?:^|[#&])gv=([^&]+)/.exec(location.hash || "");
+    if (!m) return false;
+    const s = decodeViewState(m[1]);
+    if (!s) return false;
+    setViewState(s);
+    return true;
+  }
+
+  // --- Revision diff overlay (M4) ---
+
+  let diffState: { result: DiffResult; topImg?: HTMLImageElement; bottomImg?: HTMLImageElement } | null = null;
+
+  const diffOverlayPass = {
+    id: "diff:overlay",
+    order: 190, // above board layers, below markers
+    enabled: (_rc: RenderCtx) => !!diffState,
+    draw: (rc: RenderCtx) => {
+      if (!diffState) return;
+      const img = sideMode === "top" ? diffState.topImg : diffState.bottomImg;
+      if (!img || !img.complete) return;
+      const ub = diffState.result.boardGeom.board.mm_bounds;
+      const ctx = rc.ctx;
+      const m = rc.xform.getWorldToScreenMatrix();
+      ctx.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
+      ctx.drawImage(img, ub.min_x_mm, ub.min_y_mm, ub.max_x_mm - ub.min_x_mm, ub.max_y_mm - ub.min_y_mm);
+    },
+  };
+
+  /** Overlay a revision diff (from diffGerbers) on top of the board. */
+  function showDiff(result: DiffResult) {
+    const mkImg = (url?: string) => {
+      if (!url) return undefined;
+      const img = new Image();
+      img.onload = () => viewer.requestRender("diff-loaded");
+      img.onerror = () => console.error("Diff overlay image failed to load:", url);
+      img.src = url;
+      return img;
+    };
+    diffState = { result, topImg: mkImg(result.top?.url), bottomImg: mkImg(result.bottom?.url) };
+    if (!viewer.getPass("diff:overlay")) viewer.addPass(diffOverlayPass);
+    viewer.requestRender("diff-show");
+  }
+
+  function hideDiff() {
+    diffState = null;
+    viewer.removePass("diff:overlay");
+    viewer.requestRender("diff-hide");
+  }
+
   function gerberToWorldPos(x_mm: number, y_mm: number): { x: number; y: number } {
     const b = boardGeom?.board?.mm_bounds;
     if (!b) return { x: x_mm, y: y_mm };
@@ -697,6 +990,18 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     setSideMode,
     fit: () => fitBoardToViewport(0.08),
     dispose,
+    // Image / SVG export
+    exportPng,
+    exportSvg,
+    // Revision diff overlay
+    showDiff,
+    hideDiff,
+    // Shareable view state
+    getViewState,
+    setViewState,
+    getShareUrl,
+    copyShareLink,
+    applyStateFromHash,
     // Expose new render pipeline API
     viewer,
     visibility,
