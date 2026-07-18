@@ -7,7 +7,7 @@ import { parseDrillFile, type DrillSlot } from "../parse/drill-parser";
 import type { LayerRole } from "../io/file-classifier";
 import { GerberError } from "../core/errors";
 
-type BoundsMm = { minX: number; minY: number; maxX: number; maxY: number };
+export type BoundsMm = { minX: number; minY: number; maxX: number; maxY: number };
 
 function boundsSize(b: BoundsMm) {
   return { w: b.maxX - b.minX, h: b.maxY - b.minY };
@@ -658,7 +658,44 @@ export type RenderResult = {
   revoke: () => void;
 };
 
-export async function renderGerbersFiles(files: Record<string, Uint8Array>): Promise<RenderResult> {
+/** A copper layer reference within the pure (DOM-free) SVG document set. */
+export interface SvgCopperRef {
+  id: string;
+  index: number;
+  role: "top" | "inner" | "bottom";
+  name: string;
+  color: string;
+  /** Key into `svgById` for this layer's rendered SVG source. */
+  svgId: string;
+}
+
+/**
+ * DOM-free render output: rendered layer SVGs as source strings (no blob URLs),
+ * plus the structural stackup by id. This is the pure core used by both the
+ * browser path (which wraps SVGs into blob URLs) and the headless compositor.
+ */
+export interface SvgRenderResult {
+  boardGeom: BoardGeom;
+  bounds: BoundsMm;
+  wPx: number;
+  hPx: number;
+  /** Layer id → rendered SVG source. */
+  svgById: Record<string, string>;
+  boardMaskId?: string;
+  /** Ordered top→bottom. */
+  copper: SvgCopperRef[];
+  top?: { maskId?: string; silkId?: string; pasteId?: string };
+  bottom?: { maskId?: string; silkId?: string; pasteId?: string };
+  drillsId?: string;
+  viasId?: string;
+}
+
+/**
+ * Pure, DOM-free core: parse files and produce rendered layer SVGs as strings.
+ * Works in Node/workers (no URL.createObjectURL). The browser `renderGerbersFiles`
+ * wraps this into blob URLs; the headless compositor stitches the SVG strings.
+ */
+export async function renderGerberSvgDocs(files: Record<string, Uint8Array>): Promise<SvgRenderResult> {
   const names = Object.keys(files).filter((n) => !!n);
   const stack = classifyStackup(names);
 
@@ -857,77 +894,124 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
   const wPx = Math.max(1, Math.round(mmToPx(widthMm)));
   const hPx = Math.max(1, Math.round(mmToPx(heightMm)));
 
-  const urls: string[] = [];
-  const addSvg = (svg: string) => {
-    const u = svgToBlobUrl(svg);
-    urls.push(u);
-    return u;
-  };
+  const svgById: Record<string, string> = {};
+  const emit = (id: string, svg: string) => { svgById[id] = svg; return id; };
 
-  const topMaskSvg = outPrimsN ? buildBoardMaskFromOutline(outPrimsN, b) : buildBoardMaskSvg(wPx, hPx);
-  const botMaskSvg = outPrimsN ? buildBoardMaskFromOutline(outPrimsN, b) : buildBoardMaskSvg(wPx, hPx);
+  const boardMaskSvg = outPrimsN ? buildBoardMaskFromOutline(outPrimsN, b) : buildBoardMaskSvg(wPx, hPx);
+  const boardMaskId = emit("board_mask", boardMaskSvg);
 
-  const layers: ViewerLayers = {
-    top_board_mask: addSvg(topMaskSvg),
-    bottom_board_mask: addSvg(botMaskSvg),
-  };
-
-  if (topPrimsN) layers.top_copper = addSvg(buildLayerSvgWithPolarityMask(topPrimsN, b, "#fbbf24", 1.0));
-  if (botPrimsN) layers.bottom_copper = addSvg(buildLayerSvgWithPolarityMask(botPrimsN, b, "#38bdf8", 1.0));
+  const topCopperId = topPrimsN ? emit("cu.top", buildLayerSvgWithPolarityMask(topPrimsN, b, "#fbbf24", 1.0)) : undefined;
+  const botCopperId = botPrimsN ? emit("cu.bottom", buildLayerSvgWithPolarityMask(botPrimsN, b, "#38bdf8", 1.0)) : undefined;
   // Soldermask openings rendered as bright copper highlights (pad openings where mask is absent)
-  if (topMaskPrimsN) layers.top_mask = addSvg(buildLayerSvgWithPolarityMask(topMaskPrimsN, b, "#fbbf24", 0.9));
-  if (botMaskPrimsN) layers.bottom_mask = addSvg(buildLayerSvgWithPolarityMask(botMaskPrimsN, b, "#38bdf8", 0.9));
-  if (drillHolesN.length || drillSlotsN.length) layers.drills = addSvg(buildDrillsSvg(drillHolesN, drillSlotsN, b));
+  const topMaskId = topMaskPrimsN ? emit("top:mask", buildLayerSvgWithPolarityMask(topMaskPrimsN, b, "#fbbf24", 0.9)) : undefined;
+  const botMaskId = botMaskPrimsN ? emit("bottom:mask", buildLayerSvgWithPolarityMask(botMaskPrimsN, b, "#38bdf8", 0.9)) : undefined;
+  const drillsId = (drillHolesN.length || drillSlotsN.length) ? emit("drills", buildDrillsSvg(drillHolesN, drillSlotsN, b)) : undefined;
 
   const INNER_COLORS = ["#a78bfa", "#34d399", "#fb923c", "#60a5fa", "#f472b6"];
-  const innerCopperUrls: string[] = [];
+  const innerCopperIds: string[] = [];
   for (let i = 0; i < innerCopperPrimsN.length; i++) {
     const prims = innerCopperPrimsN[i];
-    if (prims) innerCopperUrls.push(addSvg(buildLayerSvgWithPolarityMask(prims, b, INNER_COLORS[i % INNER_COLORS.length], 1.0)));
+    if (prims) {
+      const num = innerRefs[i]?.detectedNum ?? (i + 1);
+      innerCopperIds.push(emit(`cu.in${num}`, buildLayerSvgWithPolarityMask(prims, b, INNER_COLORS[i % INNER_COLORS.length], 1.0)));
+    } else {
+      innerCopperIds.push("");
+    }
   }
-  if (innerCopperUrls.length) layers.inner_copper = innerCopperUrls;
-  if (topSilkPrimsN) layers.top_silk = addSvg(buildSilkSvg(topSilkPrimsN, b));
-  if (botSilkPrimsN) layers.bottom_silk = addSvg(buildSilkSvg(botSilkPrimsN, b));
+  const topSilkId = topSilkPrimsN ? emit("top:silk", buildSilkSvg(topSilkPrimsN, b)) : undefined;
+  const botSilkId = botSilkPrimsN ? emit("bottom:silk", buildSilkSvg(botSilkPrimsN, b)) : undefined;
   // Solder paste (stencil) openings, rendered light for the reveal-on-demand control.
-  if (topPastePrimsN) layers.top_paste = addSvg(buildLayerSvgWithPolarityMask(topPastePrimsN, b, "#cbd5e1", 0.85));
-  if (botPastePrimsN) layers.bottom_paste = addSvg(buildLayerSvgWithPolarityMask(botPastePrimsN, b, "#cbd5e1", 0.85));
+  const topPasteId = topPastePrimsN ? emit("top:paste", buildLayerSvgWithPolarityMask(topPastePrimsN, b, "#cbd5e1", 0.85)) : undefined;
+  const botPasteId = botPastePrimsN ? emit("bottom:paste", buildLayerSvgWithPolarityMask(botPastePrimsN, b, "#cbd5e1", 0.85)) : undefined;
 
-  // Assemble the first-class ordered stackup from the rendered copper URLs.
-  const copperLayers: CopperLayer[] = [];
+  // Assemble the ordered copper stack referencing the rendered SVG ids.
+  const copper: SvgCopperRef[] = [];
   for (const ref of stack.copper) {
-    let url: string | undefined;
+    let svgId: string | undefined;
     let color: string;
     let name: string;
     let id: string;
     if (ref.role === "top") {
-      url = layers.top_copper; color = "#fbbf24"; name = "Top"; id = "cu.top";
+      svgId = topCopperId; color = "#fbbf24"; name = "Top"; id = "cu.top";
     } else if (ref.role === "bottom") {
-      url = layers.bottom_copper; color = "#38bdf8"; name = "Bottom"; id = "cu.bottom";
+      svgId = botCopperId; color = "#38bdf8"; name = "Bottom"; id = "cu.bottom";
     } else {
       const j = innerRefs.indexOf(ref);
-      url = innerCopperUrls[j];
+      svgId = innerCopperIds[j] || undefined;
       color = INNER_COLORS[j % INNER_COLORS.length];
       const label = ref.detectedNum ?? (j + 1);
       name = `Inner ${label}`;
       id = `cu.in${label}`;
     }
-    if (url) copperLayers.push({ id, index: ref.index, role: ref.role, name, url, color });
+    if (svgId) copper.push({ id, index: ref.index, role: ref.role, name, color, svgId });
   }
-
-  const stackup: BoardStackup = {
-    copper: copperLayers,
-    top: (layers.top_mask || layers.top_silk || layers.top_paste)
-      ? { mask: layers.top_mask, silk: layers.top_silk, paste: layers.top_paste }
-      : undefined,
-    bottom: (layers.bottom_mask || layers.bottom_silk || layers.bottom_paste)
-      ? { mask: layers.bottom_mask, silk: layers.bottom_silk, paste: layers.bottom_paste }
-      : undefined,
-    drills: layers.drills,
-    vias: layers.vias,
-  };
 
   return {
     boardGeom,
+    bounds: b,
+    wPx,
+    hPx,
+    svgById,
+    boardMaskId,
+    copper,
+    top: (topMaskId || topSilkId || topPasteId) ? { maskId: topMaskId, silkId: topSilkId, pasteId: topPasteId } : undefined,
+    bottom: (botMaskId || botSilkId || botPasteId) ? { maskId: botMaskId, silkId: botSilkId, pasteId: botPasteId } : undefined,
+    drillsId,
+    viasId: undefined,
+  };
+}
+
+/**
+ * Browser render: produce blob-URL-backed layers + stackup for the viewer.
+ * Thin wrapper over the pure `renderGerberSvgDocs` core.
+ */
+export async function renderGerbersFiles(files: Record<string, Uint8Array>): Promise<RenderResult> {
+  const docs = await renderGerberSvgDocs(files);
+
+  const urls: string[] = [];
+  const urlById = new Map<string, string>();
+  for (const [id, svg] of Object.entries(docs.svgById)) {
+    const u = svgToBlobUrl(svg);
+    urlById.set(id, u);
+    urls.push(u);
+  }
+  const url = (id?: string) => (id ? urlById.get(id) : undefined);
+
+  const boardMaskUrl = url(docs.boardMaskId);
+  const layers: ViewerLayers = {
+    top_board_mask: boardMaskUrl,
+    bottom_board_mask: boardMaskUrl,
+  };
+
+  const topCu = docs.copper.find((c) => c.role === "top");
+  const botCu = docs.copper.find((c) => c.role === "bottom");
+  const innerCu = docs.copper.filter((c) => c.role === "inner");
+
+  if (topCu) layers.top_copper = url(topCu.svgId);
+  if (botCu) layers.bottom_copper = url(botCu.svgId);
+  if (innerCu.length) layers.inner_copper = innerCu.map((c) => url(c.svgId)!).filter(Boolean);
+  if (docs.top?.maskId) layers.top_mask = url(docs.top.maskId);
+  if (docs.bottom?.maskId) layers.bottom_mask = url(docs.bottom.maskId);
+  if (docs.top?.silkId) layers.top_silk = url(docs.top.silkId);
+  if (docs.bottom?.silkId) layers.bottom_silk = url(docs.bottom.silkId);
+  if (docs.top?.pasteId) layers.top_paste = url(docs.top.pasteId);
+  if (docs.bottom?.pasteId) layers.bottom_paste = url(docs.bottom.pasteId);
+  if (docs.drillsId) layers.drills = url(docs.drillsId);
+
+  const copper: CopperLayer[] = docs.copper.map((c) => ({
+    id: c.id, index: c.index, role: c.role, name: c.name, color: c.color, url: url(c.svgId)!,
+  }));
+
+  const stackup: BoardStackup = {
+    copper,
+    top: docs.top ? { mask: url(docs.top.maskId), silk: url(docs.top.silkId), paste: url(docs.top.pasteId) } : undefined,
+    bottom: docs.bottom ? { mask: url(docs.bottom.maskId), silk: url(docs.bottom.silkId), paste: url(docs.bottom.pasteId) } : undefined,
+    drills: url(docs.drillsId),
+    vias: url(docs.viasId),
+  };
+
+  return {
+    boardGeom: docs.boardGeom,
     layers,
     stackup,
     revoke: () => urls.forEach((u) => URL.revokeObjectURL(u)),

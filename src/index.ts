@@ -1,6 +1,21 @@
 export { renderGerbersZip } from "./render/renderGerbersZip";
 export { renderGerbers } from "./render/renderGerbers";
-export { renderGerbersFiles } from "./render/renderGerbersFiles";
+export { renderGerbersFiles, renderGerberSvgDocs } from "./render/renderGerbersFiles";
+export type { SvgRenderResult, SvgCopperRef } from "./render/renderGerbersFiles";
+export type { BoardStackup, CopperLayer } from "./viewer/types";
+
+// Headless / CI render + SVG compositor
+export {
+  composeStackToSvg,
+  renderGerbersToSvg,
+  renderGerbersToImage,
+} from "./render/headless";
+export type {
+  ComposeOptions,
+  ImageOptions,
+  SvgRasterizer,
+  HeadlessInput,
+} from "./render/headless";
 
 export { detectGerberBundle } from "./core/detect";
 
