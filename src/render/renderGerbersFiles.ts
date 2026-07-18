@@ -5,6 +5,7 @@ import { classifyLayerNames } from "./layerClassify";
 import { parseGerberFile } from "../parse/gerber-parser";
 import { parseDrillFile, type DrillSlot } from "../parse/drill-parser";
 import type { LayerRole } from "../io/file-classifier";
+import { GerberError } from "../core/errors";
 
 type BoundsMm = { minX: number; minY: number; maxX: number; maxY: number };
 
@@ -47,6 +48,33 @@ function scaleGerberPrims(prims: ReturnType<typeof parseGerberFile>, s: number) 
       ...r,
       loops: r.loops.map((loop) => loop.map((p) => ({ x: p.x * s, y: p.y * s }))),
     })),
+    // ops drives the polarity-correct copper/mask rendering; it must be scaled
+    // in lockstep with tracks/flashes/regions or layers render at the wrong size.
+    ops: prims.ops.map((op) => {
+      if (op.kind === "track") {
+        return {
+          ...op,
+          start: { x: op.start.x * s, y: op.start.y * s },
+          end: { x: op.end.x * s, y: op.end.y * s },
+          widthMm: op.widthMm * s,
+        };
+      }
+      if (op.kind === "flash") {
+        return {
+          ...op,
+          position: { x: op.position.x * s, y: op.position.y * s },
+          diameterMm: op.diameterMm * s,
+          widthMm: op.widthMm !== undefined ? op.widthMm * s : undefined,
+          heightMm: op.heightMm !== undefined ? op.heightMm * s : undefined,
+          cornerMm: op.cornerMm !== undefined ? op.cornerMm * s : undefined,
+        };
+      }
+      // region
+      return {
+        ...op,
+        loops: op.loops.map((loop) => loop.map((p) => ({ x: p.x * s, y: p.y * s }))),
+      };
+    }),
   };
 }
 
@@ -498,39 +526,6 @@ function buildLayerSvgWithPolarityMask(
     if (rendered) paint.push(rendered);
   }
 
-  // Debug logging for polarity counts
-  console.log("[polarity counts]", {
-    tracksClear: prims.tracks.filter(t => t.polarity === "clear").length,
-    regionsClear: prims.regions.filter(r => r.polarity === "clear").length,
-    negativePlane: negative,
-  });
-
-  // Enhanced debug logging for plane detection
-  const boardArea = (bounds.maxX - bounds.minX) * (bounds.maxY - bounds.minY);
-  let largestDarkRegionArea = 0;
-  let largestClearRegionArea = 0;
-  for (const r of prims.regions) {
-    const bb = bboxOfRegion(r);
-    const area = (bb.maxX - bb.minX) * (bb.maxY - bb.minY);
-    if (r.polarity === "clear") largestClearRegionArea = Math.max(largestClearRegionArea, area);
-    else largestDarkRegionArea = Math.max(largestDarkRegionArea, area);
-  }
-  const darkCount = prims.tracks.filter((t) => t.polarity !== "clear").length +
-                    prims.flashes.filter((f) => f.polarity !== "clear").length +
-                    prims.regions.filter((r) => r.polarity !== "clear").length;
-  const clearCount = prims.tracks.filter((t) => t.polarity === "clear").length +
-                    prims.flashes.filter((f) => f.polarity === "clear").length +
-                    prims.regions.filter((r) => r.polarity === "clear").length;
-  
-  console.log("[plane detect]", {
-    darkCount,
-    clearCount,
-    largestDarkRegionArea,
-    largestClearRegionArea,
-    boardArea,
-    negative,
-  });
-
   // Mask composition:
   // - start black (transparent)
   // - dark = white (visible)
@@ -671,7 +666,9 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
     if (!path) return null;
     const data = files[path];
     if (!data) return null;
-    return dec.decode(data);
+    const text = dec.decode(data);
+    // Strip a leading UTF-8 BOM so it doesn't corrupt the first parsed command.
+    return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   };
 
   const topText = await readText(classified.top_copper);
@@ -714,6 +711,22 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
   const innerCopperPrims = innerCopperTexts.map((text, i) =>
     text ? parseGerberFile(classified.inner_copper![i], text, "InnerCopper" as LayerRole) : null
   );
+
+  // Honour the documented error contract: if nothing recognizable was found,
+  // fail loudly instead of silently returning a blank default board.
+  const hasAnyLayer = !!(
+    topPrims || botPrims || outPrims ||
+    topSilkPrims || botSilkPrims || topMaskPrims || botMaskPrims ||
+    drillHoles.length || drillSlots.length ||
+    innerCopperPrims.some(Boolean)
+  );
+  if (!hasAnyLayer) {
+    throw new GerberError(
+      "MISSING_LAYERS",
+      "No recognizable Gerber or drill layers were found in the bundle.",
+      { files: names }
+    );
+  }
 
   const topB = topPrims ? ensureFiniteBounds(boundsFromGerber(topPrims)) : null;
   const botB = botPrims ? ensureFiniteBounds(boundsFromGerber(botPrims)) : null;

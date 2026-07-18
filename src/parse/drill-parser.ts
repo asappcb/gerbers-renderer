@@ -62,6 +62,10 @@ export function parseDrillFile(name: string, content: string): ParsedDrillData {
   let fmtDec = 4;
   let inHeader = false;
   let fmtExplicit = false;
+  // Zero-suppression mode for integer-encoded coordinates:
+  //   "TZ" (trailing zeros kept / leading suppressed) → decimal fixed from the right (default)
+  //   "LZ" (leading zeros kept / trailing suppressed)  → must right-pad to full width
+  let zeroMode: "LZ" | "TZ" | null = null;
 
   // Routing mode state
   let inRoutMode = false; // true between M15 and M16/M17
@@ -72,9 +76,15 @@ export function parseDrillFile(name: string, content: string): ParsedDrillData {
   const decodeCoord = (raw: string): number => {
     // If the string contains a decimal point, it's explicit — use directly
     if (raw.includes(".")) return parseFloat(raw) * unitScale;
-    // Integer-encoded: implied decimal point based on fmtDec
+    // Integer-encoded: implied decimal point based on the format.
     const sign = raw.startsWith("-") ? -1 : 1;
-    const digits = raw.replace(/[+\-]/, "");
+    let digits = raw.replace(/[+\-]/, "");
+    // "LZ" keeps leading zeros and suppresses trailing ones, so the decimal is
+    // fixed from the LEFT — right-pad to the full field width before scaling.
+    // "TZ"/unknown keeps the decimal fixed from the right (divide by 10^fmtDec).
+    if (zeroMode === "LZ") {
+      digits = digits.padEnd(fmtInt + fmtDec, "0");
+    }
     const n = parseInt(digits, 10);
     if (Number.isNaN(n)) return 0;
     return sign * (n / Math.pow(10, fmtDec)) * unitScale;
@@ -97,6 +107,10 @@ export function parseDrillFile(name: string, content: string): ParsedDrillData {
     if (line === "M16" || line === "M17") { inRoutMode = false; gMode = 5; continue; }
 
     if (inHeader) {
+      // Zero-suppression token (e.g. METRIC,LZ,000.000 or INCH,TZ)
+      if (/[,\s]LZ\b/i.test(line)) zeroMode = "LZ";
+      else if (/[,\s]TZ\b/i.test(line)) zeroMode = "TZ";
+
       if (line.startsWith("METRIC")) {
         unitScale = 1.0;
         // Altium metric default is 3.3 unless the header specifies otherwise
@@ -147,8 +161,8 @@ export function parseDrillFile(name: string, content: string): ParsedDrillData {
     const gModeMatch = /^G0*([015])(?!\d)/.exec(line);
     if (gModeMatch) gMode = parseInt(gModeMatch[1], 10);
 
-    // Skip non-coordinate G/R/M/F lines (but not lines that also contain X)
-    if (/^[GRMF]/.test(line) && !/X/i.test(line)) continue;
+    // Skip non-coordinate G/R/M/F lines (but not lines that also carry an X or Y)
+    if (/^[GRMF]/.test(line) && !/[XY]/i.test(line)) continue;
 
     const diameter = (currentTool && toolDiameters.has(currentTool))
       ? toolDiameters.get(currentTool)!
@@ -166,11 +180,14 @@ export function parseDrillFile(name: string, content: string): ParsedDrillData {
       continue;
     }
 
-    // Regular coordinate line: X...Y...
-    const coord = /X([+\-]?[\d.]+)Y([+\-]?[\d.]+)/i.exec(line);
-    if (coord) {
-      const xVal = decodeCoord(coord[1]);
-      const yVal = decodeCoord(coord[2]);
+    // Regular coordinate line. X and Y are each optional/modal — an X-only or
+    // Y-only line reuses the previous value for the missing axis (common in
+    // size-optimized Excellon output).
+    const xm = /X([+\-]?[\d.]+)/i.exec(line);
+    const ym = /Y([+\-]?[\d.]+)/i.exec(line);
+    if (xm || ym) {
+      const xVal = xm ? decodeCoord(xm[1]) : routX;
+      const yVal = ym ? decodeCoord(ym[1]) : routY;
       if (Number.isFinite(xVal) && Number.isFinite(yVal)) {
         if (gMode === 0) {
           // Rapid move — update position only, no hole/slot

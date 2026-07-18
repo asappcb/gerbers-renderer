@@ -125,7 +125,7 @@ interface ParserState {
  * - Handles %FS, %MO, %AD for simple circular apertures (C)
  * - Handles D01 (draw), D02 (move), D03 (flash)
  * - Handles G36/G37 for filled regions with multiple contours
- * - Ignores arcs (G02/G03) for now
+ * - Tessellates arcs (G02/G03) using the I/J center-offset form
  *
  * It is good enough to visualize traces and pads for many KiCad/JLC style Gerbers.
  */
@@ -635,23 +635,4 @@ function decodeCoord(numStr: string, state: ParserState): number {
   const scale = Math.pow(10, state.fmtDec);
   const val = (n / scale) * state.unitScale;
   return sign * val;
-}
-
-function parseApertureParam(raw: string, state: ParserState): number | undefined {
-  const s = raw.trim();
-  if (!s) return undefined;
-
-  // If it contains a decimal point, treat as a real value in current units
-  if (s.includes(".")) {
-    const v = parseFloat(s);
-    if (Number.isNaN(v)) return undefined;
-    return v * state.unitScale;
-  }
-
-  // Otherwise treat it like FS style integer (same fmtDec as coordinates)
-  const n = parseInt(s, 10);
-  if (Number.isNaN(n)) return undefined;
-
-  const scale = Math.pow(10, state.fmtDec);
-  return (n / scale) * state.unitScale;
 }
