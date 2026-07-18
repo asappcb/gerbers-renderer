@@ -13,7 +13,13 @@ export { ViewportTransform } from "./render-pipeline/core/viewportTransform";
 export { Viewer } from "./render-pipeline/viewer";
 export { RenderScheduler } from "./render-pipeline/core/renderScheduler";
 export { VisibilityManager } from "./render-pipeline/visibilityManager";
-export { createIntegratedViewer, type IntegratedViewerOptions } from "./render-pipeline/integratedViewer";
+export {
+  createIntegratedViewer,
+  // Backward-compatible alias: the pre-1.0 public API (and existing consumers
+  // such as gerber-preview-extension) import this name.
+  createIntegratedViewer as createBoardViewer,
+  type IntegratedViewerOptions,
+} from "./render-pipeline/integratedViewer";
 
 // Overlay system
 export { OverlayRegistry } from "./render-pipeline/overlayRegistry";
