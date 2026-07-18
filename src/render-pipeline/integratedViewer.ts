@@ -5,6 +5,7 @@ import { Viewer } from './viewer';
 import { dfmToBoardCoordinates } from './dfmCoordinateAdapter';
 import { composeStackToSvg } from '../render/headless';
 import type { SvgRenderResult } from '../render/renderGerbersFiles';
+import type { DiffResult } from '../render/diff';
 import {
   OverlayRegistry, 
   MarkerRenderer, 
@@ -821,6 +822,46 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     }
   }
 
+  // --- Revision diff overlay (M4) ---
+
+  let diffState: { result: DiffResult; topImg?: HTMLImageElement; bottomImg?: HTMLImageElement } | null = null;
+
+  const diffOverlayPass = {
+    id: "diff:overlay",
+    order: 190, // above board layers, below markers
+    enabled: (_rc: RenderCtx) => !!diffState,
+    draw: (rc: RenderCtx) => {
+      if (!diffState) return;
+      const img = sideMode === "top" ? diffState.topImg : diffState.bottomImg;
+      if (!img || !img.complete) return;
+      const ub = diffState.result.boardGeom.board.mm_bounds;
+      const ctx = rc.ctx;
+      const m = rc.xform.getWorldToScreenMatrix();
+      ctx.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
+      ctx.drawImage(img, ub.min_x_mm, ub.min_y_mm, ub.max_x_mm - ub.min_x_mm, ub.max_y_mm - ub.min_y_mm);
+    },
+  };
+
+  /** Overlay a revision diff (from diffGerbers) on top of the board. */
+  function showDiff(result: DiffResult) {
+    const mkImg = (url?: string) => {
+      if (!url) return undefined;
+      const img = new Image();
+      img.onload = () => viewer.requestRender("diff-loaded");
+      img.src = url;
+      return img;
+    };
+    diffState = { result, topImg: mkImg(result.top?.url), bottomImg: mkImg(result.bottom?.url) };
+    if (!viewer.getPass("diff:overlay")) viewer.addPass(diffOverlayPass);
+    viewer.requestRender("diff-show");
+  }
+
+  function hideDiff() {
+    diffState = null;
+    viewer.removePass("diff:overlay");
+    viewer.requestRender("diff-hide");
+  }
+
   function gerberToWorldPos(x_mm: number, y_mm: number): { x: number; y: number } {
     const b = boardGeom?.board?.mm_bounds;
     if (!b) return { x: x_mm, y: y_mm };
@@ -851,6 +892,9 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     // Image / SVG export
     exportPng,
     exportSvg,
+    // Revision diff overlay
+    showDiff,
+    hideDiff,
     // Expose new render pipeline API
     viewer,
     visibility,

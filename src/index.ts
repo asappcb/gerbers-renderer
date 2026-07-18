@@ -17,6 +17,10 @@ export type {
   HeadlessInput,
 } from "./render/headless";
 
+// Revision diff
+export { diffGerbers, computeDiffAlignment } from "./render/diff";
+export type { DiffResult, DiffSide, DiffOptions, DiffInput, DiffAlignment } from "./render/diff";
+
 export { detectGerberBundle } from "./core/detect";
 
 export type { RenderResult } from "./render/renderGerbersFiles";
