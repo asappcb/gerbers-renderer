@@ -70,9 +70,18 @@ export interface Selection {
     };
 }
 export declare class SelectionRenderer {
+    private getMarkerPosition?;
+    /**
+     * @param getMarkerPosition optional lookup returning a marker's board-space
+     *   position (mm) by id, so a marker selection can be highlighted where the
+     *   marker actually is.
+     */
+    constructor(getMarkerPosition?: ((id: string) => {
+        x: number;
+        y: number;
+    } | undefined) | undefined);
     draw(rc: RenderCtx, selection: Selection | null): void;
     private drawMarkerSelection;
-    private drawGeometrySelection;
     private drawRegionSelection;
 }
 export declare function createSelectionPass(renderer: SelectionRenderer, getSelection: () => Selection | null): RenderPass;

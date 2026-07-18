@@ -74,7 +74,7 @@ export interface GerberPrimitiveFlash {
  * - Handles %FS, %MO, %AD for simple circular apertures (C)
  * - Handles D01 (draw), D02 (move), D03 (flash)
  * - Handles G36/G37 for filled regions with multiple contours
- * - Ignores arcs (G02/G03) for now
+ * - Tessellates arcs (G02/G03) using the I/J center-offset form
  *
  * It is good enough to visualize traces and pads for many KiCad/JLC style Gerbers.
  */

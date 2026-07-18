@@ -2,6 +2,7 @@ import { RenderPass, VisibilityState, OverlayApi, Overlay, Marker } from './core
 import { CameraState } from './core/viewportTransform';
 import { OverlayRegistry } from './overlayRegistry';
 import { ViewerEvents } from './viewerEvents';
+import { VisibilityManager } from './visibilityManager';
 export declare class Viewer {
     private canvas;
     private ctx;
@@ -11,6 +12,7 @@ export declare class Viewer {
     private scheduler;
     private overlays;
     private overlayApi;
+    private resizeObserver;
     private boardBounds;
     private markers;
     private markerPicker;
@@ -24,6 +26,10 @@ export declare class Viewer {
     private setHoverMarker;
     constructor(canvas: HTMLCanvasElement, initialCamera: CameraState);
     private setupResizeHandling;
+    /** Tear down observers and cancel any pending frame. Call when removing the viewer. */
+    dispose(): void;
+    /** The single visibility manager the render passes read from. */
+    getVisibilityManager(): VisibilityManager;
     private registerDefaultPasses;
     addPass(pass: RenderPass): void;
     removePass(id: string): boolean;
