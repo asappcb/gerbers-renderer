@@ -2,7 +2,9 @@
 //
 // Revision diff: compare two Gerber sets and produce per-side visual diffs
 // (added = green, removed = red, unchanged = faint) plus a change summary.
-// Registration aligns the two boards by their outline min-corner.
+// Registration places both boards in a shared absolute mm frame (their union),
+// so features at the same absolute coordinate overlap; `boardSizeChanged` flags
+// when the two outlines differ in size.
 
 import { renderGerberSvgDocs } from "./renderGerbersFiles";
 import { composeStackToSvg } from "./headless";

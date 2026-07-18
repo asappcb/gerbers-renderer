@@ -463,15 +463,16 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
 
     // Inner copper — registered but hidden by default; the layer panel reveals them.
     // Drawn above the current-side copper (and mask) but below silk for inspection.
+    // Orders 20..59 leave room for up to ~40 inner layers before reaching silk.
     stackup.copper
       .filter((c) => c.role === "inner")
       .forEach((c, idx) => register(c.id, 20 + idx, c.url, { meta: { label: c.name, color: c.color } }));
 
-    if (extras?.silk) register(`${side}:silk`, 30, extras.silk, { meta: { label: `${cap(side)} silkscreen`, color: "#f1f5f9" } });
-    if (extras?.paste) register(`${side}:paste`, 32, extras.paste, { meta: { label: `${cap(side)} paste`, color: "#cbd5e1" } });
+    if (extras?.silk) register(`${side}:silk`, 60, extras.silk, { meta: { label: `${cap(side)} silkscreen`, color: "#f1f5f9" } });
+    if (extras?.paste) register(`${side}:paste`, 62, extras.paste, { meta: { label: `${cap(side)} paste`, color: "#cbd5e1" } });
 
-    register("layer:drills", 40, stackup.drills);
-    register("layer:vias", 45, stackup.vias);
+    register("layer:drills", 70, stackup.drills);
+    register("layer:vias", 75, stackup.vias);
 
     // Force an immediate render and another one shortly after to handle image loading
     viewer.requestRender("side-switch");
@@ -765,6 +766,22 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
       .map((c) => c.id);
   }
 
+  // Compose options mirroring the current side + layer-panel visibility, so
+  // exports match what's on screen.
+  function composeOptsFromState() {
+    const outer = stackup?.copper.find((c) => c.role === (sideMode === "top" ? "top" : "bottom"));
+    return {
+      side: sideMode,
+      revealed: revealedIds(),
+      includeFR4: layerVisible["layer:fr4"] ?? true,
+      outerCopper: outer ? (layerVisible[outer.id] ?? true) : true,
+      sideMask: layerVisible[`${sideMode}:mask`] ?? true,
+      sideSilk: layerVisible[`${sideMode}:silk`] ?? true,
+      sidePaste: layerVisible[`${sideMode}:paste`] ?? true,
+      drills: layerVisible["layer:drills"] ?? true,
+    };
+  }
+
   // Reconstruct the pure SVG document set from the viewer's blob-URL layers so
   // we can reuse the headless composeStackToSvg() for crisp SVG/PNG export.
   async function reconstructSvgDocs(): Promise<SvgRenderResult | null> {
@@ -808,7 +825,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   async function exportSvg() {
     const docs = await reconstructSvgDocs();
     if (!docs) return;
-    const svg = composeStackToSvg(docs, { side: sideMode, revealed: revealedIds() });
+    const svg = composeStackToSvg(docs, composeOptsFromState());
     downloadBlob(new Blob([svg], { type: "image/svg+xml" }), `board-${sideMode}.svg`);
   }
 
@@ -821,14 +838,16 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     }
     const docs = await reconstructSvgDocs();
     if (!docs) return;
-    const svg = composeStackToSvg(docs, { side: sideMode, revealed: revealedIds() });
+    const svg = composeStackToSvg(docs, composeOptsFromState());
     const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
     try {
       const img = await loadImageEl(url);
       const c = document.createElement("canvas");
+      // Clamp the longest side to MAX with a single factor so the aspect ratio holds.
       const MAX = 8000;
-      c.width = Math.min(MAX, Math.max(1, Math.round(docs.wPx * scale)));
-      c.height = Math.min(MAX, Math.max(1, Math.round(docs.hPx * scale)));
+      const eff = Math.min(scale, MAX / Math.max(1, docs.wPx), MAX / Math.max(1, docs.hPx));
+      c.width = Math.max(1, Math.round(docs.wPx * eff));
+      c.height = Math.max(1, Math.round(docs.hPx * eff));
       const ctx = c.getContext("2d");
       if (!ctx) return;
       ctx.drawImage(img, 0, 0, c.width, c.height);
@@ -884,7 +903,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
 
   async function copyShareLink(): Promise<string> {
     const url = getShareUrl();
-    location.hash = `gv=${encodeViewState(getViewState())}`;
+    try { location.hash = new URL(url).hash; } catch { /* ignore */ }
     try {
       await navigator.clipboard?.writeText(url);
     } catch {
@@ -929,6 +948,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
       if (!url) return undefined;
       const img = new Image();
       img.onload = () => viewer.requestRender("diff-loaded");
+      img.onerror = () => console.error("Diff overlay image failed to load:", url);
       img.src = url;
       return img;
     };

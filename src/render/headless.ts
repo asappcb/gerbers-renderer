@@ -20,6 +20,16 @@ export interface ComposeOptions {
   background?: string;
   /** Clip everything to the real board outline. Default true. */
   clipToBoard?: boolean;
+  /** Include the side's outer copper. Default true. */
+  outerCopper?: boolean;
+  /** Include the side's soldermask. Default true. */
+  sideMask?: boolean;
+  /** Include the side's silkscreen. Default true. */
+  sideSilk?: boolean;
+  /** Include the side's solder paste. Default true. */
+  sidePaste?: boolean;
+  /** Include drills. Default true. */
+  drills?: boolean;
 }
 
 const dataUri = (svg: string) => `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
@@ -36,6 +46,11 @@ export function composeStackToSvg(docs: SvgRenderResult, opts: ComposeOptions = 
     includeFR4 = true,
     background = "#1a5f1a",
     clipToBoard = true,
+    outerCopper = true,
+    sideMask = true,
+    sideSilk = true,
+    sidePaste = true,
+    drills = true,
   } = opts;
 
   const { wPx, hPx, svgById } = docs;
@@ -51,19 +66,19 @@ export function composeStackToSvg(docs: SvgRenderResult, opts: ComposeOptions = 
   if (includeFR4) parts.push(`<rect x="0" y="0" width="${wPx}" height="${hPx}" fill="${background}"/>`);
 
   const outer = docs.copper.find((c) => c.role === (side === "top" ? "top" : "bottom"));
-  if (outer) parts.push(imageEl(outer.svgId));
+  if (outer && outerCopper) parts.push(imageEl(outer.svgId));
 
   const extras = side === "top" ? docs.top : docs.bottom;
-  if (extras?.maskId) parts.push(imageEl(extras.maskId));
+  if (extras?.maskId && sideMask) parts.push(imageEl(extras.maskId));
 
   // Revealed copper (inner or opposite side), drawn above the side copper/mask, in stack order.
   for (const c of docs.copper) {
     if (c.id !== outer?.id && revealed.includes(c.id)) parts.push(imageEl(c.svgId));
   }
 
-  if (extras?.silkId) parts.push(imageEl(extras.silkId));
-  if (extras?.pasteId) parts.push(imageEl(extras.pasteId));
-  if (docs.drillsId) parts.push(imageEl(docs.drillsId));
+  if (extras?.silkId && sideSilk) parts.push(imageEl(extras.silkId));
+  if (extras?.pasteId && sidePaste) parts.push(imageEl(extras.pasteId));
+  if (docs.drillsId && drills) parts.push(imageEl(docs.drillsId));
 
   const body = parts.filter(Boolean).join("\n    ");
 

@@ -43,7 +43,15 @@ export function encodeViewState(state: ViewState): string {
 export function decodeViewState(encoded: string): ViewState | null {
   try {
     const parsed = JSON.parse(b64UrlDecode(encoded));
-    if (parsed && parsed.v === 1 && (parsed.side === "top" || parsed.side === "bottom") && parsed.cam) {
+    const finite = (n: unknown) => typeof n === "number" && Number.isFinite(n);
+    if (
+      parsed &&
+      parsed.v === 1 &&
+      (parsed.side === "top" || parsed.side === "bottom") &&
+      parsed.cam &&
+      finite(parsed.cam.x) && finite(parsed.cam.y) && finite(parsed.cam.zoom) &&
+      (parsed.cam.rot === undefined || finite(parsed.cam.rot))
+    ) {
       return parsed as ViewState;
     }
     return null;

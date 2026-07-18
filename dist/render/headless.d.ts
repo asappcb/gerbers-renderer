@@ -11,6 +11,16 @@ export interface ComposeOptions {
     background?: string;
     /** Clip everything to the real board outline. Default true. */
     clipToBoard?: boolean;
+    /** Include the side's outer copper. Default true. */
+    outerCopper?: boolean;
+    /** Include the side's soldermask. Default true. */
+    sideMask?: boolean;
+    /** Include the side's silkscreen. Default true. */
+    sideSilk?: boolean;
+    /** Include the side's solder paste. Default true. */
+    sidePaste?: boolean;
+    /** Include drills. Default true. */
+    drills?: boolean;
 }
 /**
  * Stitch a rendered stackup into one composited SVG string. Pure — no DOM.
