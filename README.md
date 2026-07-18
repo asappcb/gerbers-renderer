@@ -16,6 +16,8 @@ Designed for web apps, browser extensions, CI previews, manufacturing portals, a
 - Slot holes (Excellon routing mode M15/M16/G01 and G85 oblong syntax)
 - Inner copper layers (>2 layers, KiCad and Altium naming)
 - Silkscreen layers
+- First-class multilayer stackup (arbitrary copper count; KiCad/Altium/generic naming), only-current-side view with reveal-on-demand inner layers
+- Solder paste / stencil layers
 
 **File format support**
 - RS-274X (Gerber) parser with polarity (LPD/LPC), regions, aperture macros
@@ -31,7 +33,15 @@ Designed for web apps, browser extensions, CI previews, manufacturing portals, a
 - Grid overlay with mm / in units
 - Marker system for DFM annotations (error / warning / info)
 - Overlay system for custom visualizations
+- Image / SVG export (current view, full board, per side)
+- Revision diff overlay (compare two Gerber sets)
+- Shareable deep-links (side + camera + visibility encoded in the URL)
 - Configurable download button
+
+**Headless / CI**
+- DOM-free render to a self-contained SVG (`renderGerbersToSvg`)
+- Render to PNG via a pluggable rasterizer (`renderGerbersToImage`)
+- Revision diff for CI (`diffGerbers`)
 
 **Library**
 - Drop-in — mounts into any DOM node
@@ -146,6 +156,60 @@ viewer.removeMarker(id);
 // Visibility
 viewer.visibility.setOverlayVisibility("grid", true);
 viewer.visibility.setMarkersVisibility(false);
+
+// Export
+viewer.exportPng("board");   // "view" | "board"
+viewer.exportSvg();
+
+// Shareable view state
+const url = await viewer.copyShareLink();   // also writes #gv=… to the URL
+const state = viewer.getViewState();
+viewer.setViewState(state);
+```
+
+`createBoardViewer` is a backward-compatible alias for `createIntegratedViewer`.
+
+## Multilayer stackup
+
+`renderGerbers*` return a first-class ordered `stackup` alongside the legacy flat `layers`:
+
+```typescript
+const { boardGeom, layers, stackup } = await renderGerbers(buffer);
+// stackup.copper: ordered top→bottom CopperLayer[] (role, name, url, color)
+// stackup.top / stackup.bottom: { mask?, silk?, paste? }
+viewer.setData({ boardGeom, layers, stackup });
+```
+
+Inner copper is detected across KiCad (`In1_Cu`…), Altium (`.g2`…), and generic
+naming, ordered numerically. The viewer shows only the current side by default;
+inner/opposite layers are revealed on demand from the layer menu.
+
+## Headless / CI render
+
+DOM-free — runs in Node, workers, or CI. Accepts a zip/rar/single-file buffer or a files map.
+
+```typescript
+import { renderGerbersToSvg, renderGerbersToImage } from "gerbers-renderer";
+
+// Self-contained SVG (no DOM, no external refs)
+const svg = await renderGerbersToSvg(buffer, { side: "top" });
+
+// PNG bytes — browser canvas by default; pass a rasterizer (e.g. resvg-js) in Node
+const png = await renderGerbersToImage(buffer, { side: "top", scale: 2, rasterizer });
+```
+
+## Revision diff
+
+```typescript
+import { diffGerbers } from "gerbers-renderer";
+
+const diff = await diffGerbers(revA, revB);
+// diff.summary: { boardSizeChanged, addedArea_mm2, removedArea_mm2 }
+// diff.top / diff.bottom: { url, addedArea_mm2, removedArea_mm2, … }  (green added / red removed)
+
+viewer.showDiff(diff);   // overlay on the board
+viewer.hideDiff();
+diff.revoke();           // release diff image URLs when done
 ```
 
 ## Bundle detection
@@ -216,7 +280,8 @@ npm run build    # library bundle → dist/
 
 - 7z / tar unpacking
 - WASM-only core split
-- Headless CI validation mode
+- Aperture macros (`%AM`) and step-and-repeat (`%SR`)
+- X2/X3 attribute-driven layer classification
 
 ## What this is not
 

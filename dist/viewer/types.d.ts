@@ -15,6 +15,44 @@ export type BoardGeom = {
         x: number;
         y: number;
     }>>;
+    /** Number of copper layers detected (1 for single-sided, 2 for standard, N for multilayer). */
+    layer_count?: number;
+};
+/** A single copper layer within the board stackup, ordered top (index 0) to bottom. */
+export type CopperLayer = {
+    /** Stable id: "cu.top", "cu.in1" … "cu.bottom". */
+    id: string;
+    /** Physical position: 0 = top … N-1 = bottom. */
+    index: number;
+    role: "top" | "inner" | "bottom";
+    /** Display label, e.g. "Top", "Inner 1", "Bottom". */
+    name: string;
+    /** Rendered layer blob URL (browser path). */
+    url: string;
+    color: string;
+};
+/**
+ * First-class ordered board stackup. Copper layers are ordered top→bottom.
+ * Non-copper layers (mask/silk/paste) only exist for the two outer sides.
+ * This is the canonical multilayer structure; `ViewerLayers` remains for
+ * backward compatibility and is derived from / kept in sync with this.
+ */
+export type BoardStackup = {
+    /** Ordered top→bottom, length ≥ 1. */
+    copper: CopperLayer[];
+    top?: {
+        mask?: string;
+        silk?: string;
+        paste?: string;
+    };
+    bottom?: {
+        mask?: string;
+        silk?: string;
+        paste?: string;
+    };
+    /** Through-hole drills (span the whole stack). */
+    drills?: string;
+    vias?: string;
 };
 export type ViewerLayers = Partial<{
     top_copper: string;
@@ -23,6 +61,8 @@ export type ViewerLayers = Partial<{
     bottom_mask: string;
     top_silk: string;
     bottom_silk: string;
+    top_paste: string;
+    bottom_paste: string;
     inner_copper: string[];
     drills: string;
     vias: string;
