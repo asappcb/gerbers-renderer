@@ -1,6 +1,6 @@
 // src/render/renderGerbersFiles.ts
 
-import type { BoardGeom, ViewerLayers, BoardStackup, CopperLayer } from "../viewer/types";
+import type { BoardGeom, ViewerLayers, BoardStackup, CopperLayer, BoardGeometry, BoardFeature } from "../viewer/types";
 import { classifyStackup } from "./layerClassify";
 import { parseGerberFile } from "../parse/gerber-parser";
 import { parseDrillFile, type DrillSlot } from "../parse/drill-parser";
@@ -655,6 +655,8 @@ export type RenderResult = {
   layers: ViewerLayers;
   /** First-class ordered board stackup (canonical multilayer structure). */
   stackup: BoardStackup;
+  /** Parsed geometry + stats (world coords) for inspection/measurement/connectivity. */
+  geometry: BoardGeometry;
   revoke: () => void;
 };
 
@@ -688,6 +690,8 @@ export interface SvgRenderResult {
   bottom?: { maskId?: string; silkId?: string; pasteId?: string };
   drillsId?: string;
   viasId?: string;
+  /** Parsed geometry + stats (world coords). */
+  geometry: BoardGeometry;
 }
 
 /**
@@ -947,12 +951,48 @@ export async function renderGerberSvgDocs(files: Record<string, Uint8Array>): Pr
     if (svgId) copper.push({ id, index: ref.index, role: ref.role, name, color, svgId });
   }
 
+  // Parsed geometry (world coords, Y-flipped to match the viewer/marker frame).
+  const worldY = (y: number) => b.minY + b.maxY - y;
+  const feats: BoardFeature[] = [];
+  let minTraceW = Infinity;
+  const addLayerFeatures = (prims: ReturnType<typeof parseGerberFile> | null, layerId: string) => {
+    if (!prims) return;
+    for (const f of prims.flashes) {
+      const w = f.widthMm ?? f.diameterMm ?? 0;
+      const h = f.heightMm ?? f.diameterMm ?? 0;
+      feats.push({ kind: "pad", layer: layerId, x_mm: f.position.x, y_mm: worldY(f.position.y), w_mm: w, h_mm: h, shape: f.shape });
+    }
+    for (const t of prims.tracks) {
+      feats.push({ kind: "trace", layer: layerId, x1_mm: t.start.x, y1_mm: worldY(t.start.y), x2_mm: t.end.x, y2_mm: worldY(t.end.y), width_mm: t.width });
+      if (t.width > 0) minTraceW = Math.min(minTraceW, t.width);
+    }
+  };
+  addLayerFeatures(topPrimsN, "cu.top");
+  addLayerFeatures(botPrimsN, "cu.bottom");
+  innerCopperPrimsN.forEach((p, j) => addLayerFeatures(p, `cu.in${j + 1}`));
+  for (const hole of drillHolesN) feats.push({ kind: "hole", x_mm: hole.x, y_mm: worldY(hole.y), diameter_mm: hole.diameter });
+
+  const drillSizesMm = Array.from(new Set(drillHolesN.map((h) => Math.round(h.diameter * 1000) / 1000))).sort((a, z) => a - z);
+  const geometry: BoardGeometry = {
+    features: feats,
+    stats: {
+      widthMm: b.maxX - b.minX,
+      heightMm: b.maxY - b.minY,
+      copperLayers: copper.length,
+      padCount: feats.filter((f) => f.kind === "pad").length,
+      holeCount: drillHolesN.length + drillSlotsN.length,
+      drillSizesMm,
+      minTraceWidthMm: minTraceW === Infinity ? undefined : minTraceW,
+    },
+  };
+
   return {
     boardGeom,
     bounds: b,
     wPx,
     hPx,
     svgById,
+    geometry,
     boardMaskId,
     copper,
     top: (topMaskId || topSilkId || topPasteId) ? { maskId: topMaskId, silkId: topSilkId, pasteId: topPasteId } : undefined,
@@ -1015,6 +1055,7 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
     boardGeom: docs.boardGeom,
     layers,
     stackup,
+    geometry: docs.geometry,
     revoke: () => urls.forEach((u) => URL.revokeObjectURL(u)),
   };
 }

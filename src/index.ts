@@ -29,6 +29,9 @@ export { detectGerberBundle } from "./core/detect";
 
 export type { RenderResult } from "./render/renderGerbersFiles";
 export type { BoardGeom, ViewerLayers, ViewerSideMode } from "./viewer/types";
+export type {
+  BoardGeometry, BoardFeature, BoardStats, PadFeature, HoleFeature, TraceFeature,
+} from "./viewer/types";
 export { GerberError } from "./core/errors";
 
 // New render pipeline system

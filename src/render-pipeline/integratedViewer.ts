@@ -1,5 +1,5 @@
 import "../viewer/viewer.css";
-import type { BoardGeom, ViewerLayers, ViewerSideMode, BoardStackup, CopperLayer } from '../viewer/types';
+import type { BoardGeom, ViewerLayers, ViewerSideMode, BoardStackup, CopperLayer, BoardGeometry, BoardFeature, TraceFeature } from '../viewer/types';
 import type { RenderCtx, OverlayApi, Overlay, Marker as DfmMarker } from './core/renderContract';
 import { Viewer } from './viewer';
 import { dfmToBoardCoordinates } from './dfmCoordinateAdapter';
@@ -12,6 +12,7 @@ import { OverlayRegistry } from './overlayRegistry';
 import { createOverlayPass } from './overlayPass';
 import { MarkerStore } from './markerStore';
 import { MarkerPicker } from './markerPicker';
+import { UniformGridIndex } from './uniformGridIndex';
 import { createMarkerPass } from './markerPass';
 import { SelectionRenderer, createSelectionPass, type Selection } from './renderPasses';
 import { Emitter } from './events';
@@ -72,6 +73,13 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
               <div class="layer-panel" id="layer-panel" hidden></div>
             </div>
 
+            <button class="btn" id="measure-btn" type="button" title="Measure distance">Measure</button>
+
+            <div class="layer-dropdown" id="info-dropdown">
+              <button class="btn" id="info-menu-btn" type="button" title="Board info">Info</button>
+              <div class="layer-panel" id="info-panel" hidden></div>
+            </div>
+
             <div class="layer-dropdown" id="export-dropdown">
               <button class="btn" id="export-menu-btn" type="button" title="Export image">
                 <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:14px;height:14px"><path d="M8 1v9M4.5 6.5L8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -98,6 +106,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
         <div id="board-viewport">
           <canvas id="render-canvas"></canvas>
           <div class="board-viewer-hint">Scroll to zoom, drag to pan.</div>
+          <div class="board-info-bar" id="info-bar" hidden></div>
         </div>
       </div>
     </div>
@@ -116,6 +125,10 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   const layerPanel = mustGet<HTMLDivElement>(root, "#layer-panel");
   const exportMenuBtn = mustGet<HTMLButtonElement>(root, "#export-menu-btn");
   const exportPanel = mustGet<HTMLDivElement>(root, "#export-panel");
+  const measureBtn = mustGet<HTMLButtonElement>(root, "#measure-btn");
+  const infoMenuBtn = mustGet<HTMLButtonElement>(root, "#info-menu-btn");
+  const infoPanel = mustGet<HTMLDivElement>(root, "#info-panel");
+  const infoBar = mustGet<HTMLDivElement>(root, "#info-bar");
 
   // Initialize render pipeline
   const viewer = new Viewer(canvas, {
@@ -256,6 +269,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   let boardGeom: BoardGeom | null = null;
   let layers: ViewerLayers = {};
   let stackup: BoardStackup | null = null;
+  let geometry: BoardGeometry | null = null;
   let sideMode: ViewerSideMode = "top";
   let didInteract = false;
   // Ids of layer passes registered on the last updateRenderPasses() (for teardown).
@@ -580,23 +594,58 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     );
   });
 
-  // Hover picking (skipped while panning to avoid churn).
+  // Hover: marker hover + cursor/feature info bar + live measurement preview.
   canvas.addEventListener("mousemove", (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const board = viewer.screenToBoard(event.clientX - rect.left, event.clientY - rect.top);
+    if (measureMode && measureStart && !measureEnd) {
+      measureCurrent = { x: board.x, y: board.y };
+      viewer.requestRender("measure-move");
+    }
     if (isDragging) return;
     setHoverMarker(pickAt(event.clientX, event.clientY).hit?.id ?? null);
+    updateInfoBar(board.x, board.y);
+  });
+  canvas.addEventListener("mouseleave", () => {
+    infoBar.hidden = true;
+    setHoverMarker(null);
   });
 
-  // Click: select a marker under the cursor, else emit a board click. Suppressed
-  // after a drag so panning doesn't clear/alter the selection.
+  // Click: in measure mode, place measurement points (snapped to features);
+  // otherwise select a marker under the cursor, else emit a board click.
+  // Suppressed after a drag so panning doesn't alter selection/measurement.
   canvas.addEventListener("click", (event) => {
     if (dragMoved) return;
-    const { hit, rc, x_px, y_px } = pickAt(event.clientX, event.clientY);
+    const rect = canvas.getBoundingClientRect();
+    const board = viewer.screenToBoard(event.clientX - rect.left, event.clientY - rect.top);
+
+    if (measureMode) {
+      const snapped = snapPoint(board.x, board.y);
+      if (!measureStart || measureEnd) { measureStart = snapped; measureEnd = null; measureCurrent = snapped; }
+      else { measureEnd = snapped; }
+      viewer.requestRender("measure-click");
+      return;
+    }
+
+    const { hit } = pickAt(event.clientX, event.clientY);
     if (hit) {
       setSelectedMarker(hit.id);
+      netFeatureIds = null;
+      viewer.requestRender("net-clear");
+      return;
+    }
+
+    // Click a copper feature → highlight its net; empty space clears.
+    const zoom = viewer.getCamera().zoom || 1;
+    const feat = pickFeature(board.x, board.y, 6 / zoom);
+    setSelectedMarker(null);
+    if (feat && feat.feature.kind !== "hole") {
+      netFeatureIds = computeNet(feat.id);
+      viewer.requestRender("net-highlight");
     } else {
-      setSelectedMarker(null);
-      const b = rc.screenToBoard({ x: x_px, y: y_px });
-      events.emit("click:board", { x_mm: b.x, y_mm: b.y });
+      netFeatureIds = null;
+      events.emit("click:board", { x_mm: board.x, y_mm: board.y });
+      viewer.requestRender("net-clear");
     }
   });
 
@@ -682,6 +731,22 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     });
   });
 
+  measureBtn.addEventListener("click", () => {
+    measureMode = !measureMode;
+    measureBtn.classList.toggle("active", measureMode);
+    canvas.style.cursor = measureMode ? "crosshair" : "";
+    if (!measureMode) clearMeasure();
+    viewer.requestRender("measure-toggle");
+  });
+
+  infoMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const willOpen = infoPanel.hidden;
+    if (willOpen) renderStatsPanel();
+    infoPanel.hidden = !willOpen;
+    infoMenuBtn.classList.toggle("active", willOpen);
+  });
+
   const onDocumentClick = (e: MouseEvent) => {
     const t = e.target as Node;
     if (!layerPanel.hidden && !layerPanel.contains(t) && e.target !== layerMenuBtn) {
@@ -691,6 +756,10 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     if (!exportPanel.hidden && !exportPanel.contains(t) && e.target !== exportMenuBtn) {
       exportPanel.hidden = true;
       exportMenuBtn.classList.remove("active");
+    }
+    if (!infoPanel.hidden && !infoPanel.contains(t) && e.target !== infoMenuBtn) {
+      infoPanel.hidden = true;
+      infoMenuBtn.classList.remove("active");
     }
   };
   document.addEventListener("click", onDocumentClick);
@@ -714,9 +783,13 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     return el as T;
   }
 
-  function setData(data: { boardGeom: BoardGeom; layers: ViewerLayers; stackup?: BoardStackup }) {
+  function setData(data: { boardGeom: BoardGeom; layers: ViewerLayers; stackup?: BoardStackup; geometry?: BoardGeometry }) {
     boardGeom = data.boardGeom;
     layers = data.layers;
+    geometry = data.geometry ?? null;
+    buildFeatureIndex();
+    netFeatureIds = null;
+    clearMeasure();
     // Prefer the first-class stackup; derive one from legacy flat layers otherwise.
     stackup = data.stackup ?? deriveStackup(data.layers);
 
@@ -835,6 +908,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     return {
       boardGeom, bounds: { minX: mm.min_x_mm, minY: mm.min_y_mm, maxX: mm.max_x_mm, maxY: mm.max_y_mm },
       wPx, hPx, svgById, boardMaskId, copper, top, bottom, drillsId, viasId: undefined,
+      geometry: geometry ?? { features: [], stats: { widthMm: wMm, heightMm: hMm, copperLayers: stackup.copper.length, padCount: 0, holeCount: 0, drillSizesMm: [] } },
     };
   }
 
@@ -938,6 +1012,212 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     return true;
   }
 
+  // --- Inspection / measurement (C) ---
+
+  const fmtLen = (mm: number): string => {
+    const unit = gridUnits.value;
+    return unit === "in" ? `${(mm / 25.4).toFixed(4)} in` : `${mm.toFixed(2)} mm`;
+  };
+
+  // World Y → Gerber Y (unflip) for a user-facing coordinate readout.
+  function worldToGerberY(wy: number): number {
+    const mm = boardGeom?.board?.mm_bounds;
+    return mm ? mm.min_y_mm + mm.max_y_mm - wy : wy;
+  }
+
+  function featureDesc(f: BoardFeature): string {
+    if (f.kind === "pad") return `Pad ${f.shape} ${f.w_mm.toFixed(2)}×${f.h_mm.toFixed(2)}mm`;
+    if (f.kind === "hole") return `Hole ⌀${f.diameter_mm.toFixed(2)}mm`;
+    return `Trace ${f.width_mm.toFixed(2)}mm (${f.layer})`;
+  }
+
+  function updateInfoBar(wx: number, wy: number) {
+    const unit = gridUnits.value;
+    const conv = unit === "in" ? 1 / 25.4 : 1;
+    const gx = (wx * conv).toFixed(unit === "in" ? 4 : 2);
+    const gy = (worldToGerberY(wy) * conv).toFixed(unit === "in" ? 4 : 2);
+    let text = `X ${gx}  Y ${gy} ${unit}`;
+    const zoom = viewer.getCamera().zoom || 1;
+    const f = pickFeature(wx, wy, 6 / zoom);
+    if (f) text += `  ·  ${featureDesc(f.feature)}`;
+    infoBar.textContent = text;
+    infoBar.hidden = false;
+  }
+
+  function renderStatsPanel() {
+    if (!geometry) { infoPanel.innerHTML = `<div class="info-row">No board loaded</div>`; return; }
+    const s = geometry.stats;
+    const rows: [string, string][] = [
+      ["Size", `${s.widthMm.toFixed(1)} × ${s.heightMm.toFixed(1)} mm`],
+      ["Copper layers", String(s.copperLayers)],
+      ["Pads", String(s.padCount)],
+      ["Holes", String(s.holeCount)],
+      ["Drill sizes", s.drillSizesMm.length ? s.drillSizesMm.map((d) => d.toFixed(2)).join(", ") + " mm" : "—"],
+      ["Min trace", s.minTraceWidthMm ? `${s.minTraceWidthMm.toFixed(3)} mm` : "—"],
+    ];
+    infoPanel.innerHTML = rows.map(([k, v]) => `<div class="info-row"><span>${k}</span><b>${v}</b></div>`).join("");
+  }
+
+  // Snap a board point to the nearest pad/hole centre within tolerance.
+  function snapPoint(wx: number, wy: number): { x: number; y: number } {
+    const zoom = viewer.getCamera().zoom || 1;
+    const f = pickFeature(wx, wy, 8 / zoom);
+    if (f && (f.feature.kind === "pad" || f.feature.kind === "hole")) {
+      return { x: f.feature.x_mm, y: f.feature.y_mm };
+    }
+    return { x: wx, y: wy };
+  }
+
+  let measureMode = false;
+  let measureStart: { x: number; y: number } | null = null;
+  let measureEnd: { x: number; y: number } | null = null;
+  let measureCurrent: { x: number; y: number } | null = null;
+
+  function clearMeasure() {
+    measureStart = null; measureEnd = null; measureCurrent = null;
+  }
+
+  const measurePass = {
+    id: "measure",
+    order: 195,
+    enabled: (_rc: RenderCtx) => measureMode && !!measureStart,
+    draw: (rc: RenderCtx) => {
+      if (!measureStart) return;
+      const ctx = rc.ctx;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      const pa = rc.boardToScreen({ x: measureStart.x, y: measureStart.y });
+      const dot = (p: { x: number; y: number }) => { ctx.beginPath(); ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2); ctx.fill(); };
+      ctx.fillStyle = "#0ea5e9";
+      dot(pa);
+      const end = measureEnd ?? measureCurrent;
+      if (end) {
+        const pb = rc.boardToScreen({ x: end.x, y: end.y });
+        ctx.strokeStyle = "#0ea5e9"; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
+        ctx.setLineDash([]);
+        dot(pb);
+        const dist = Math.hypot(end.x - measureStart.x, end.y - measureStart.y);
+        const label = fmtLen(dist);
+        const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2;
+        ctx.font = "12px system-ui, sans-serif";
+        const w = ctx.measureText(label).width + 10;
+        ctx.fillStyle = "rgba(15,23,42,0.9)";
+        ctx.fillRect(mx - w / 2, my - 20, w, 16);
+        ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(label, mx, my - 12);
+        ctx.textAlign = "left";
+      }
+    },
+  };
+  viewer.addPass(measurePass);
+
+  // --- Connectivity net highlight (C3) ---
+  // Infers a net by geometric flood-fill: copper features touching within a
+  // tolerance are connected; plated holes bridge features across layers.
+
+  let netFeatureIds: Set<string> | null = null;
+  const NET_TOL = 0.02; // mm
+
+  function segSegDist(a: { x1_mm: number; y1_mm: number; x2_mm: number; y2_mm: number }, b: { x1_mm: number; y1_mm: number; x2_mm: number; y2_mm: number }): number {
+    return Math.min(
+      pointSegDist(a.x1_mm, a.y1_mm, b.x1_mm, b.y1_mm, b.x2_mm, b.y2_mm),
+      pointSegDist(a.x2_mm, a.y2_mm, b.x1_mm, b.y1_mm, b.x2_mm, b.y2_mm),
+      pointSegDist(b.x1_mm, b.y1_mm, a.x1_mm, a.y1_mm, a.x2_mm, a.y2_mm),
+      pointSegDist(b.x2_mm, b.y2_mm, a.x1_mm, a.y1_mm, a.x2_mm, a.y2_mm),
+    );
+  }
+
+  const featRadius = (f: BoardFeature): number =>
+    f.kind === "pad" ? Math.max(f.w_mm, f.h_mm) / 2 : f.kind === "hole" ? f.diameter_mm / 2 : f.width_mm / 2;
+
+  // Surface-to-surface distance between two copper features (circle/segment approx).
+  function ffDist(a: BoardFeature, b: BoardFeature): number {
+    if (a.kind !== "trace" && b.kind !== "trace") {
+      return Math.hypot(a.x_mm - b.x_mm, a.y_mm - b.y_mm) - featRadius(a) - featRadius(b);
+    }
+    if (a.kind === "trace" && b.kind === "trace") {
+      return segSegDist(a, b) - a.width_mm / 2 - b.width_mm / 2;
+    }
+    const seg = (a.kind === "trace" ? a : b) as TraceFeature;
+    const pt = (a.kind === "trace" ? b : a) as Exclude<BoardFeature, TraceFeature>;
+    return pointSegDist(pt.x_mm, pt.y_mm, seg.x1_mm, seg.y1_mm, seg.x2_mm, seg.y2_mm) - featRadius(pt) - seg.width_mm / 2;
+  }
+
+  function ffContains(f: BoardFeature, x: number, y: number): boolean {
+    if (f.kind === "pad") return Math.abs(x - f.x_mm) <= f.w_mm / 2 + 0.01 && Math.abs(y - f.y_mm) <= f.h_mm / 2 + 0.01;
+    if (f.kind === "trace") return pointSegDist(x, y, f.x1_mm, f.y1_mm, f.x2_mm, f.y2_mm) <= f.width_mm / 2 + 0.01;
+    return Math.hypot(x - f.x_mm, y - f.y_mm) <= f.diameter_mm / 2 + 0.01;
+  }
+
+  function candidatesAround(f: BoardFeature): Set<string> {
+    const pts: [number, number][] = f.kind === "trace"
+      ? [[f.x1_mm, f.y1_mm], [f.x2_mm, f.y2_mm], [(f.x1_mm + f.x2_mm) / 2, (f.y1_mm + f.y2_mm) / 2]]
+      : [[f.x_mm, f.y_mm]];
+    const out = new Set<string>();
+    for (const [x, y] of pts) for (const id of featureIndex.queryRadius(x, y, 2)) out.add(id);
+    return out;
+  }
+
+  function computeNet(startId: string): Set<string> {
+    const net = new Set<string>([startId]);
+    const stack = [startId];
+    const MAX = 20000;
+    while (stack.length && net.size < MAX) {
+      const f = featureById.get(stack.pop()!);
+      if (!f || f.kind === "hole") continue;
+      const cands = candidatesAround(f);
+      for (const cid of cands) {
+        if (net.has(cid)) continue;
+        const cf = featureById.get(cid);
+        if (!cf || cf.kind === "hole") continue;
+        if (ffDist(f, cf) <= NET_TOL) { net.add(cid); stack.push(cid); }
+      }
+      // Bridge across layers through any plated hole this feature covers.
+      for (const cid of cands) {
+        const hole = featureById.get(cid);
+        if (hole?.kind !== "hole" || !ffContains(f, hole.x_mm, hole.y_mm)) continue;
+        for (const oid of featureIndex.queryRadius(hole.x_mm, hole.y_mm, 2)) {
+          if (net.has(oid)) continue;
+          const of = featureById.get(oid);
+          if (!of || of.kind === "hole") continue;
+          if (ffContains(of, hole.x_mm, hole.y_mm)) { net.add(oid); stack.push(oid); }
+        }
+      }
+    }
+    return net;
+  }
+
+  const netPass = {
+    id: "net",
+    order: 192,
+    enabled: (_rc: RenderCtx) => !!netFeatureIds && netFeatureIds.size > 0,
+    draw: (rc: RenderCtx) => {
+      if (!netFeatureIds) return;
+      const active = activeCopperLayerIds();
+      const m = rc.xform.getWorldToScreenMatrix();
+      const ctx = rc.ctx;
+      ctx.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
+      // Vivid fuchsia so the net stands out on any copper colour.
+      ctx.fillStyle = "rgba(217, 70, 239, 0.75)";
+      ctx.strokeStyle = "rgba(217, 70, 239, 0.9)";
+      ctx.lineCap = "round";
+      for (const id of netFeatureIds) {
+        const f = featureById.get(id);
+        if (!f || f.kind === "hole" || !active.has(f.layer)) continue;
+        if (f.kind === "pad") {
+          ctx.fillRect(f.x_mm - f.w_mm / 2, f.y_mm - f.h_mm / 2, f.w_mm, f.h_mm);
+        } else {
+          ctx.lineWidth = f.width_mm;
+          ctx.beginPath();
+          ctx.moveTo(f.x1_mm, f.y1_mm);
+          ctx.lineTo(f.x2_mm, f.y2_mm);
+          ctx.stroke();
+        }
+      }
+    },
+  };
+  viewer.addPass(netPass);
+
   // --- Revision diff overlay (M4) ---
 
   let diffState: { result: DiffResult; topImg?: HTMLImageElement; bottomImg?: HTMLImageElement } | null = null;
@@ -1005,6 +1285,80 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     viewer.requestRender("selection-change");
   }
 
+  // --- Board feature index (pads / holes / traces) for inspect / measure / net (C) ---
+
+  const featureIndex = new UniformGridIndex(5);
+  const featureById = new Map<string, BoardFeature>();
+
+  function buildFeatureIndex() {
+    featureIndex.clear();
+    featureById.clear();
+    if (!geometry) return;
+    geometry.features.forEach((f, i) => {
+      const id = `f${i}`;
+      featureById.set(id, f);
+      if (f.kind === "pad" || f.kind === "hole") {
+        featureIndex.insert(id, f.x_mm, f.y_mm);
+      } else {
+        // Sample points along the segment (~every 3mm) so mid-segment picks hit,
+        // not just picks that land on an endpoint/midpoint.
+        const len = Math.hypot(f.x2_mm - f.x1_mm, f.y2_mm - f.y1_mm);
+        const n = Math.max(1, Math.ceil(len / 3));
+        for (let k = 0; k <= n; k++) {
+          const t = k / n;
+          featureIndex.insert(id, f.x1_mm + (f.x2_mm - f.x1_mm) * t, f.y1_mm + (f.y2_mm - f.y1_mm) * t);
+        }
+      }
+    });
+  }
+
+  // Copper layer ids currently drawn (current side's outer copper + revealed layers).
+  function activeCopperLayerIds(): Set<string> {
+    const ids = new Set<string>();
+    if (!stackup) return ids;
+    const outer = stackup.copper.find((c) => c.role === (sideMode === "top" ? "top" : "bottom"));
+    if (outer && (layerVisible[outer.id] ?? true)) ids.add(outer.id);
+    for (const c of stackup.copper) {
+      if (c.id !== outer?.id && (layerVisible[c.id] ?? false)) ids.add(c.id);
+    }
+    return ids;
+  }
+
+  function pointSegDist(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+  }
+
+  // Distance from a board point to a feature's surface (0 if inside).
+  function featureDist(f: BoardFeature, x: number, y: number): number {
+    if (f.kind === "pad") {
+      const dx = Math.abs(x - f.x_mm) - f.w_mm / 2;
+      const dy = Math.abs(y - f.y_mm) - f.h_mm / 2;
+      return Math.hypot(Math.max(dx, 0), Math.max(dy, 0));
+    }
+    if (f.kind === "hole") return Math.max(0, Math.hypot(x - f.x_mm, y - f.y_mm) - f.diameter_mm / 2);
+    return Math.max(0, pointSegDist(x, y, f.x1_mm, f.y1_mm, f.x2_mm, f.y2_mm) - f.width_mm / 2);
+  }
+
+  function pickFeature(x: number, y: number, tol_mm: number): { id: string; feature: BoardFeature; dist: number } | null {
+    const active = activeCopperLayerIds();
+    const drillsVisible = layerVisible["layer:drills"] ?? true;
+    const ids = new Set(featureIndex.queryRadius(x, y, tol_mm + 3));
+    let best: { id: string; feature: BoardFeature; dist: number } | null = null;
+    for (const id of ids) {
+      const f = featureById.get(id);
+      if (!f) continue;
+      if (f.kind === "hole") { if (!drillsVisible) continue; }
+      else if (!active.has(f.layer)) continue;
+      const d = featureDist(f, x, y);
+      if (d <= tol_mm && (!best || d < best.dist)) best = { id, feature: f, dist: d };
+    }
+    return best;
+  }
+
   // Minimal render-context shim so MarkerPicker can hit-test against the live camera.
   function pickAt(clientX: number, clientY: number) {
     const rect = canvas.getBoundingClientRect();
@@ -1067,6 +1421,14 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     overlayRegistry,
     markerStore,
     markerPicker,
+    getGeometry: () => geometry,
+    getStats: () => geometry?.stats ?? null,
+    pickFeatureAt: (clientX: number, clientY: number) => {
+      const rect = canvas.getBoundingClientRect();
+      const b = viewer.screenToBoard(clientX - rect.left, clientY - rect.top);
+      const zoom = viewer.getCamera().zoom || 1;
+      return pickFeature(b.x, b.y, 6 / zoom)?.feature ?? null;
+    },
     setSelection: (selection: Selection | null) => {
       currentSelection = selection;
       viewer.requestRender("selection-change");
