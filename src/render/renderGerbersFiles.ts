@@ -1,7 +1,7 @@
 // src/render/renderGerbersFiles.ts
 
-import type { BoardGeom, ViewerLayers } from "../viewer/types";
-import { classifyLayerNames } from "./layerClassify";
+import type { BoardGeom, ViewerLayers, BoardStackup, CopperLayer } from "../viewer/types";
+import { classifyStackup } from "./layerClassify";
 import { parseGerberFile } from "../parse/gerber-parser";
 import { parseDrillFile, type DrillSlot } from "../parse/drill-parser";
 import type { LayerRole } from "../io/file-classifier";
@@ -653,12 +653,32 @@ function buildDrillsSvg(
 export type RenderResult = {
   boardGeom: BoardGeom;
   layers: ViewerLayers;
+  /** First-class ordered board stackup (canonical multilayer structure). */
+  stackup: BoardStackup;
   revoke: () => void;
 };
 
 export async function renderGerbersFiles(files: Record<string, Uint8Array>): Promise<RenderResult> {
   const names = Object.keys(files).filter((n) => !!n);
-  const classified = classifyLayerNames(names);
+  const stack = classifyStackup(names);
+
+  // Ordered copper refs from the stackup.
+  const topRef = stack.copper.find((c) => c.role === "top");
+  const botRef = stack.copper.find((c) => c.role === "bottom");
+  const innerRefs = stack.copper.filter((c) => c.role === "inner"); // ordered nearest-top first
+
+  // Derive the legacy flat classification so the existing render path is unchanged.
+  const classified = {
+    top_copper: topRef?.path,
+    bottom_copper: botRef?.path,
+    inner_copper: innerRefs.length ? innerRefs.map((r) => r.path) : undefined,
+    top_mask: stack.top_mask,
+    bottom_mask: stack.bottom_mask,
+    top_silk: stack.top_silk,
+    bottom_silk: stack.bottom_silk,
+    outline: stack.outline,
+    drills: stack.drills,
+  };
 
   const dec = new TextDecoder("utf-8", { fatal: false });
 
@@ -703,11 +723,15 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
 
   const topMaskText = await readText(classified.top_mask);
   const botMaskText = await readText(classified.bottom_mask);
+  const topPasteText = await readText(stack.top_paste);
+  const botPasteText = await readText(stack.bottom_paste);
 
   const topSilkPrims = topSilkText ? parseGerberFile(classified.top_silk || "top_silk", topSilkText, "TopSilkscreen" as any) : null;
   const botSilkPrims = botSilkText ? parseGerberFile(classified.bottom_silk || "bot_silk", botSilkText, "BottomSilkscreen" as any) : null;
   const topMaskPrims = topMaskText ? parseGerberFile(classified.top_mask || "top_mask", topMaskText, "top_mask" as LayerRole) : null;
   const botMaskPrims = botMaskText ? parseGerberFile(classified.bottom_mask || "bot_mask", botMaskText, "bottom_mask" as LayerRole) : null;
+  const topPastePrims = topPasteText ? parseGerberFile(stack.top_paste || "top_paste", topPasteText, "top_paste" as LayerRole) : null;
+  const botPastePrims = botPasteText ? parseGerberFile(stack.bottom_paste || "bot_paste", botPasteText, "bottom_paste" as LayerRole) : null;
   const innerCopperPrims = innerCopperTexts.map((text, i) =>
     text ? parseGerberFile(classified.inner_copper![i], text, "InnerCopper" as LayerRole) : null
   );
@@ -717,6 +741,7 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
   const hasAnyLayer = !!(
     topPrims || botPrims || outPrims ||
     topSilkPrims || botSilkPrims || topMaskPrims || botMaskPrims ||
+    topPastePrims || botPastePrims ||
     drillHoles.length || drillSlots.length ||
     innerCopperPrims.some(Boolean)
   );
@@ -737,6 +762,8 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
   const botSilkB = botSilkPrims ? ensureFiniteBounds(boundsFromGerber(botSilkPrims)) : null;
   const topMaskB = topMaskPrims ? ensureFiniteBounds(boundsFromGerber(topMaskPrims)) : null;
   const botMaskB = botMaskPrims ? ensureFiniteBounds(boundsFromGerber(botMaskPrims)) : null;
+  const topPasteB = topPastePrims ? ensureFiniteBounds(boundsFromGerber(topPastePrims)) : null;
+  const botPasteB = botPastePrims ? ensureFiniteBounds(boundsFromGerber(botPastePrims)) : null;
 
   const refB =
     (outB && isSaneBounds(outB) ? outB : null) ||
@@ -754,6 +781,8 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
   const botSilkScale = botSilkB ? detectScaleFactor(botSilkB.maxX - botSilkB.minX, refW) : 1;
   const topMaskScale = topMaskB ? detectScaleFactor(topMaskB.maxX - topMaskB.minX, refW) : 1;
   const botMaskScale = botMaskB ? detectScaleFactor(botMaskB.maxX - botMaskB.minX, refW) : 1;
+  const topPasteScale = topPasteB ? detectScaleFactor(topPasteB.maxX - topPasteB.minX, refW) : 1;
+  const botPasteScale = botPasteB ? detectScaleFactor(botPasteB.maxX - botPasteB.minX, refW) : 1;
 
   const innerCopperBounds = innerCopperPrims.map((p) => p ? ensureFiniteBounds(boundsFromGerber(p)) : null);
   const innerCopperScales = innerCopperBounds.map((b) => b ? detectScaleFactor(b.maxX - b.minX, refW) : 1);
@@ -767,6 +796,8 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
   const botSilkPrimsN = botSilkPrims ? scaleGerberPrims(botSilkPrims, botSilkScale) : null;
   const topMaskPrimsN = topMaskPrims ? scaleGerberPrims(topMaskPrims, topMaskScale) : null;
   const botMaskPrimsN = botMaskPrims ? scaleGerberPrims(botMaskPrims, botMaskScale) : null;
+  const topPastePrimsN = topPastePrims ? scaleGerberPrims(topPastePrims, topPasteScale) : null;
+  const botPastePrimsN = botPastePrims ? scaleGerberPrims(botPastePrims, botPasteScale) : null;
   const innerCopperPrimsN = innerCopperPrims.map((p, i) =>
     p ? scaleGerberPrims(p, innerCopperScales[i]) : null
   );
@@ -820,6 +851,7 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
       },
     },
     outline_loops_mm,
+    layer_count: stack.copper.length,
   };
 
   const wPx = Math.max(1, Math.round(mmToPx(widthMm)));
@@ -856,10 +888,48 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
   if (innerCopperUrls.length) layers.inner_copper = innerCopperUrls;
   if (topSilkPrimsN) layers.top_silk = addSvg(buildSilkSvg(topSilkPrimsN, b));
   if (botSilkPrimsN) layers.bottom_silk = addSvg(buildSilkSvg(botSilkPrimsN, b));
+  // Solder paste (stencil) openings, rendered light for the reveal-on-demand control.
+  if (topPastePrimsN) layers.top_paste = addSvg(buildLayerSvgWithPolarityMask(topPastePrimsN, b, "#cbd5e1", 0.85));
+  if (botPastePrimsN) layers.bottom_paste = addSvg(buildLayerSvgWithPolarityMask(botPastePrimsN, b, "#cbd5e1", 0.85));
+
+  // Assemble the first-class ordered stackup from the rendered copper URLs.
+  const copperLayers: CopperLayer[] = [];
+  for (const ref of stack.copper) {
+    let url: string | undefined;
+    let color: string;
+    let name: string;
+    let id: string;
+    if (ref.role === "top") {
+      url = layers.top_copper; color = "#fbbf24"; name = "Top"; id = "cu.top";
+    } else if (ref.role === "bottom") {
+      url = layers.bottom_copper; color = "#38bdf8"; name = "Bottom"; id = "cu.bottom";
+    } else {
+      const j = innerRefs.indexOf(ref);
+      url = innerCopperUrls[j];
+      color = INNER_COLORS[j % INNER_COLORS.length];
+      const label = ref.detectedNum ?? (j + 1);
+      name = `Inner ${label}`;
+      id = `cu.in${label}`;
+    }
+    if (url) copperLayers.push({ id, index: ref.index, role: ref.role, name, url, color });
+  }
+
+  const stackup: BoardStackup = {
+    copper: copperLayers,
+    top: (layers.top_mask || layers.top_silk || layers.top_paste)
+      ? { mask: layers.top_mask, silk: layers.top_silk, paste: layers.top_paste }
+      : undefined,
+    bottom: (layers.bottom_mask || layers.bottom_silk || layers.bottom_paste)
+      ? { mask: layers.bottom_mask, silk: layers.bottom_silk, paste: layers.bottom_paste }
+      : undefined,
+    drills: layers.drills,
+    vias: layers.vias,
+  };
 
   return {
     boardGeom,
     layers,
+    stackup,
     revoke: () => urls.forEach((u) => URL.revokeObjectURL(u)),
   };
 }

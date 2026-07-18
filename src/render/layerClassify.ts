@@ -41,6 +41,50 @@ function pickByContains(names: string[], required: string[]) {
   return candidates[0];
 }
 
+/** An inner copper file together with its detected stack number (1 = nearest top). */
+interface InnerCopperRef {
+  path: string;
+  num: number;
+}
+
+/**
+ * Collect inner copper files with their detected stack number, ordered nearest-top first.
+ * Recognizes KiCad (In1_Cu…), Altium (.g2/.gl2…, ≥2), and generic
+ * inner/signal/layer-N naming. Ordering is numeric (In2 before In10), fixing the
+ * alphabetical bug in the legacy pickAllInnerCopper.
+ */
+function findInnerCopperNumbered(names: string[], topCopper?: string, botCopper?: string): InnerCopperRef[] {
+  const skip = new Set<string>([topCopper, botCopper].filter(Boolean) as string[]);
+  const out: InnerCopperRef[] = [];
+
+  for (const name of names) {
+    if (skip.has(name)) continue;
+    const low = norm(name);
+    const base = low.split("/").pop() || low;
+    const dotIdx = base.lastIndexOf(".");
+    const ext = dotIdx >= 0 ? base.slice(dotIdx) : "";
+
+    // KiCad: In1_Cu.gbr, project.In12_Cu.gbr
+    let m = /in(\d+)_cu/.exec(base);
+    if (m) { out.push({ path: name, num: parseInt(m[1], 10) }); continue; }
+
+    // Generic: inner1, inner_2, signal3, layer2 (keyword-anchored to avoid false hits)
+    m = /(?:inner|signal|layer)[ _-]?(\d+)/.exec(base);
+    if (m) { out.push({ path: name, num: parseInt(m[1], 10) }); continue; }
+
+    // Altium: .g2, .g3, .gl2… (numbered ≥ 2 to avoid .g1 top copper)
+    m = /^\.gl?(\d+)$/.exec(ext);
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (!Number.isNaN(n) && n >= 2) { out.push({ path: name, num: n }); }
+      continue;
+    }
+  }
+
+  out.sort((a, b) => a.num - b.num);
+  return out;
+}
+
 /** Collect inner copper layer files (KiCad In1_Cu, Altium .G2/.GL2, etc.), excluding top/bottom. */
 function pickAllInnerCopper(names: string[], topCopper?: string, botCopper?: string): string[] {
   const skip = new Set<string>([topCopper, botCopper].filter(Boolean) as string[]);
@@ -164,5 +208,80 @@ export function classifyLayerNames(names: string[]): Classified {
     outline,
     drills: drills.length ? drills : undefined,
     inner_copper: inner_copper.length ? inner_copper : undefined,
+  };
+}
+
+/** A copper layer file with its resolved physical stack position (0 = top). */
+export interface CopperRef {
+  path: string;
+  role: "top" | "inner" | "bottom";
+  /** Physical index, 0 = top … N-1 = bottom. */
+  index: number;
+  /** Detected inner number for labeling (e.g. In4 → 4); undefined for top/bottom. */
+  detectedNum?: number;
+}
+
+/** First-class stackup classification: an ordered copper list plus side-scoped extras. */
+export interface StackupClassified {
+  /** Ordered top→bottom, length ≥ 0. */
+  copper: CopperRef[];
+  top_mask?: string;
+  bottom_mask?: string;
+  top_silk?: string;
+  bottom_silk?: string;
+  top_paste?: string;
+  bottom_paste?: string;
+  outline?: string;
+  drills?: string[];
+}
+
+/**
+ * Classify a file list into a first-class ordered copper stackup.
+ * Copper layers are ordered top→bottom with sequential physical `index`.
+ * Reuses the same filename heuristics as classifyLayerNames but generalizes
+ * inner copper to an arbitrary, correctly-ordered count.
+ */
+export function classifyStackup(names: string[]): StackupClassified {
+  const files = names.filter((n) => {
+    const nl = norm(n);
+    if (nl.endsWith("/")) return false;
+    if (nl.includes("__macosx")) return false;
+    if (nl.endsWith(".ds_store")) return false;
+    return true;
+  });
+
+  const base = classifyLayerNames(files);
+
+  const top_paste =
+    pickByExt(files, [".gtp"]) ||
+    pickByContains(files, ["f_paste"]) ||
+    pickByContains(files, ["top", "paste"]);
+
+  const bottom_paste =
+    pickByExt(files, [".gbp"]) ||
+    pickByContains(files, ["b_paste"]) ||
+    pickByContains(files, ["bottom", "paste"]);
+
+  const inners = findInnerCopperNumbered(files, base.top_copper, base.bottom_copper);
+
+  // Assemble ordered copper: top, inners (nearest-top first), bottom.
+  const copper: CopperRef[] = [];
+  if (base.top_copper) copper.push({ path: base.top_copper, role: "top", index: 0 });
+  for (const inner of inners) copper.push({ path: inner.path, role: "inner", index: 0, detectedNum: inner.num });
+  if (base.bottom_copper) copper.push({ path: base.bottom_copper, role: "bottom", index: 0 });
+
+  // Assign sequential physical indices now that ordering is fixed.
+  copper.forEach((c, i) => { c.index = i; });
+
+  return {
+    copper,
+    top_mask: base.top_mask,
+    bottom_mask: base.bottom_mask,
+    top_silk: base.top_silk,
+    bottom_silk: base.bottom_silk,
+    top_paste,
+    bottom_paste,
+    outline: base.outline,
+    drills: base.drills,
   };
 }

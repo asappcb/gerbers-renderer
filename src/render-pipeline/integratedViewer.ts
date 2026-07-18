@@ -1,5 +1,5 @@
 import "../viewer/viewer.css";
-import type { BoardGeom, ViewerLayers, ViewerSideMode } from '../viewer/types';
+import type { BoardGeom, ViewerLayers, ViewerSideMode, BoardStackup, CopperLayer } from '../viewer/types';
 import type { RenderCtx, OverlayApi, Marker as DfmMarker } from './core/renderContract';
 import { Viewer } from './viewer';
 import { dfmToBoardCoordinates } from './dfmCoordinateAdapter';
@@ -226,27 +226,27 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   viewer.addPass(createMarkerPass(markerRenderer));
   viewer.addPass(createSelectionPass(selectionRenderer, () => currentSelection));
 
-  // Per-pass visibility (true by default)
+  // Per-pass visibility (true by default; inner copper defaults to hidden)
   const layerVisible: Record<string, boolean> = {};
 
-  const LAYER_META: Record<string, { label: string; color: string }> = {
-    'layer:fr4':            { label: 'FR4 substrate',     color: '#1a5f1a' },
-    'layer:top-copper':     { label: 'Top copper',        color: '#fbbf24' },
-    'layer:top-mask':       { label: 'Top soldermask',    color: '#fde68a' },
-    'layer:top-silk':       { label: 'Top silkscreen',    color: '#f1f5f9' },
-    'layer:bottom-copper':  { label: 'Bottom copper',     color: '#38bdf8' },
-    'layer:bottom-mask':    { label: 'Bottom soldermask', color: '#bae6fd' },
-    'layer:bottom-silk':    { label: 'Bottom silkscreen', color: '#f1f5f9' },
-    'layer:drills':         { label: 'Drill holes',       color: '#111111' },
+  // Layer metadata (label + swatch color), populated dynamically from the stackup.
+  const layerMeta: Record<string, { label: string; color: string }> = {
+    'layer:fr4':    { label: 'FR4 substrate', color: '#1a5f1a' },
+    'layer:drills': { label: 'Drill holes',   color: '#111111' },
+    'layer:vias':   { label: 'Vias',          color: '#111111' },
   };
-  // Inner layer colors (cycled if >5 inner layers)
+  // Inner layer colors (cycled if >5 inner layers) — used when deriving a
+  // stackup from legacy flat layers.
   const INNER_LAYER_COLORS = ['#a78bfa', '#34d399', '#fb923c', '#60a5fa', '#f472b6'];
 
   // State
   let boardGeom: BoardGeom | null = null;
   let layers: ViewerLayers = {};
+  let stackup: BoardStackup | null = null;
   let sideMode: ViewerSideMode = "top";
   let didInteract = false;
+  // Ids of layer passes registered on the last updateRenderPasses() (for teardown).
+  let registeredLayerPassIds: string[] = [];
 
   // Layer images as render passes with board clipping
   function createImagePass(id: string, order: number, imageUrl: string | undefined) {
@@ -385,54 +385,71 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     ctx.restore();
   }
 
-  function updateRenderPasses() {
-    // Clear existing layer passes (fixed + any previously registered inner layers)
-    const existingPasses = [
-      "layer:fr4", "layer:top-copper", "layer:bottom-copper",
-      "layer:top-mask", "layer:bottom-mask", "layer:top-silk",
-      "layer:bottom-silk", "layer:drills", "layer:vias",
-      ...Object.keys(layerVisible).filter((id) => id.startsWith("layer:inner-")),
-    ];
-    existingPasses.forEach((id) => viewer.removePass(id));
+  const isInnerId = (id: string) => id.startsWith("cu.in");
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-    if (!boardGeom) return;
-
-    // Add layer passes in correct order
-    const layerConfigs: Array<{ id: string; order: number; url?: string; useFR4?: boolean }> = [
-      { id: "layer:fr4",           order:  5, useFR4: true },
-      { id: "layer:bottom-copper", order: 10, url: sideMode === "bottom" ? layers.bottom_copper : undefined },
-      { id: "layer:bottom-mask",   order: 15, url: sideMode === "bottom" ? layers.bottom_mask   : undefined },
-      { id: "layer:bottom-silk",   order: 20, url: sideMode === "bottom" ? layers.bottom_silk   : undefined },
-      // Inner layers occupy orders 21..24 (registered dynamically below)
-      { id: "layer:top-copper",    order: 25, url: sideMode === "top"    ? layers.top_copper    : undefined },
-      { id: "layer:top-mask",      order: 30, url: sideMode === "top"    ? layers.top_mask      : undefined },
-      { id: "layer:top-silk",      order: 35, url: sideMode === "top"    ? layers.top_silk      : undefined },
-      { id: "layer:drills",        order: 40, url: layers.drills },
-      { id: "layer:vias",          order: 45, url: layers.vias },
-    ];
-
-    layerConfigs.forEach((config) => {
-      let pass;
-      if (config.useFR4) {
-        pass = createFR4Pass(config.id, config.order);
-      } else if (config.url) {
-        pass = createImagePass(config.id, config.order, config.url);
-      }
-      if (pass) viewer.addPass(pass);
+  /** Build a stackup from legacy flat layers, for callers using the old setData shape. */
+  function deriveStackup(l: ViewerLayers): BoardStackup {
+    const copper: CopperLayer[] = [];
+    if (l.top_copper) copper.push({ id: "cu.top", index: 0, role: "top", name: "Top", url: l.top_copper, color: "#fbbf24" });
+    (l.inner_copper ?? []).forEach((url, i) => {
+      copper.push({ id: `cu.in${i + 1}`, index: 0, role: "inner", name: `Inner ${i + 1}`, url, color: INNER_LAYER_COLORS[i % INNER_LAYER_COLORS.length] });
     });
+    if (l.bottom_copper) copper.push({ id: "cu.bottom", index: 0, role: "bottom", name: "Bottom", url: l.bottom_copper, color: "#38bdf8" });
+    copper.forEach((c, i) => { c.index = i; });
+    return {
+      copper,
+      top: { mask: l.top_mask, silk: l.top_silk, paste: l.top_paste },
+      bottom: { mask: l.bottom_mask, silk: l.bottom_silk, paste: l.bottom_paste },
+      drills: l.drills,
+      vias: l.vias,
+    };
+  }
 
-    // Inner copper layers (visible on both sides, between bottom and top copper)
-    if (layers.inner_copper) {
-      layers.inner_copper.forEach((url, idx) => {
-        const id = `layer:inner-${idx + 1}`;
-        LAYER_META[id] = {
-          label: `Inner ${idx + 1}`,
-          color: INNER_LAYER_COLORS[idx % INNER_LAYER_COLORS.length],
-        };
-        const pass = createImagePass(id, 21 + idx, url); // orders 21, 22, 23…
-        if (pass) viewer.addPass(pass);
-      });
-    }
+  function updateRenderPasses() {
+    // Remove the layer passes registered on the previous pass build.
+    registeredLayerPassIds.forEach((id) => viewer.removePass(id));
+    registeredLayerPassIds = [];
+
+    if (!boardGeom || !stackup) return;
+
+    const register = (
+      id: string,
+      order: number,
+      url: string | undefined,
+      opts?: { fr4?: boolean; meta?: { label: string; color: string } }
+    ) => {
+      const fr4 = !!opts?.fr4;
+      if (!fr4 && !url) return;
+      if (opts?.meta) layerMeta[id] = opts.meta;
+      // Inner copper is hidden by default (reveal on demand); everything else shown.
+      if (!(id in layerVisible)) layerVisible[id] = !isInnerId(id);
+      const pass = fr4 ? createFR4Pass(id, order) : createImagePass(id, order, url);
+      if (pass) { viewer.addPass(pass); registeredLayerPassIds.push(id); }
+    };
+
+    register("layer:fr4", 5, undefined, { fr4: true });
+
+    // Only the current side's outer copper + its mask/silk/paste are shown by
+    // default; inner and opposite-side copper are revealed on demand.
+    const side = sideMode;
+    const outer = stackup.copper.find((c) => c.role === (side === "top" ? "top" : "bottom"));
+    if (outer) register(outer.id, 10, outer.url, { meta: { label: `${outer.name} copper`, color: outer.color } });
+
+    const extras = side === "top" ? stackup.top : stackup.bottom;
+    if (extras?.mask) register(`${side}:mask`, 15, extras.mask, { meta: { label: `${cap(side)} soldermask`, color: side === "top" ? "#fde68a" : "#bae6fd" } });
+
+    // Inner copper — registered but hidden by default; the layer panel reveals them.
+    // Drawn above the current-side copper (and mask) but below silk for inspection.
+    stackup.copper
+      .filter((c) => c.role === "inner")
+      .forEach((c, idx) => register(c.id, 20 + idx, c.url, { meta: { label: c.name, color: c.color } }));
+
+    if (extras?.silk) register(`${side}:silk`, 30, extras.silk, { meta: { label: `${cap(side)} silkscreen`, color: "#f1f5f9" } });
+    if (extras?.paste) register(`${side}:paste`, 32, extras.paste, { meta: { label: `${cap(side)} paste`, color: "#cbd5e1" } });
+
+    register("layer:drills", 40, stackup.drills);
+    register("layer:vias", 45, stackup.vias);
 
     // Force an immediate render and another one shortly after to handle image loading
     viewer.requestRender("side-switch");
@@ -442,26 +459,10 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   }
 
   function rebuildLayerPanel() {
-    // Build display order dynamically, inserting inner layers between bottom and top copper
-    const innerIds = Object.keys(LAYER_META)
-      .filter((id) => id.startsWith("layer:inner-"))
-      .sort((a, b) => {
-        const na = parseInt(a.split("-").pop() || "0", 10);
-        const nb = parseInt(b.split("-").pop() || "0", 10);
-        return na - nb;
-      });
-
-    const LAYER_DISPLAY_ORDER = [
-      "layer:drills",
-      "layer:top-silk", "layer:top-mask", "layer:top-copper",
-      ...innerIds,
-      "layer:bottom-silk", "layer:bottom-mask", "layer:bottom-copper",
-      "layer:fr4",
-    ];
-
-    const active = LAYER_DISPLAY_ORDER.filter((id) => !!viewer.getPass(id));
-    layerPanel.innerHTML = active.map(id => {
-      const meta = LAYER_META[id] ?? { label: id, color: '#888' };
+    // Display top-of-stack first (reverse of render order).
+    const ids = [...registeredLayerPassIds].reverse();
+    layerPanel.innerHTML = ids.map((id) => {
+      const meta = layerMeta[id] ?? { label: id, color: '#888' };
       const checked = layerVisible[id] ?? true;
       const border = meta.color === '#f1f5f9' ? ' border:1px solid #cbd5e1;' : '';
       return `<label class="layer-item" data-layer-id="${id}">` +
@@ -641,10 +642,12 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     return el as T;
   }
 
-  function setData(data: { boardGeom: BoardGeom; layers: ViewerLayers }) {
+  function setData(data: { boardGeom: BoardGeom; layers: ViewerLayers; stackup?: BoardStackup }) {
     boardGeom = data.boardGeom;
     layers = data.layers;
-    
+    // Prefer the first-class stackup; derive one from legacy flat layers otherwise.
+    stackup = data.stackup ?? deriveStackup(data.layers);
+
     // Set board bounds for proper coordinate system using true Gerber-space bounds
     if (boardGeom?.board?.mm_bounds) {
       viewer.setBoardBounds({
