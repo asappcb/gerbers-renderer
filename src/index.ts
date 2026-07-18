@@ -21,6 +21,10 @@ export type {
 export { diffGerbers, computeDiffAlignment } from "./render/diff";
 export type { DiffResult, DiffSide, DiffOptions, DiffInput, DiffAlignment } from "./render/diff";
 
+// Shareable view state
+export { encodeViewState, decodeViewState } from "./render-pipeline/viewState";
+export type { ViewState } from "./render-pipeline/viewState";
+
 export { detectGerberBundle } from "./core/detect";
 
 export type { RenderResult } from "./render/renderGerbersFiles";

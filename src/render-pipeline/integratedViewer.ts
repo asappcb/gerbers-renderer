@@ -6,6 +6,7 @@ import { dfmToBoardCoordinates } from './dfmCoordinateAdapter';
 import { composeStackToSvg } from '../render/headless';
 import type { SvgRenderResult } from '../render/renderGerbersFiles';
 import type { DiffResult } from '../render/diff';
+import { encodeViewState, decodeViewState, type ViewState } from './viewState';
 import {
   OverlayRegistry, 
   MarkerRenderer, 
@@ -86,7 +87,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
               </div>
             </div>
 
-            <button class="btn" id="fit-btn" type="button" title="Fit to viewport">Fit</button>${showDownloadButton ? `
+            <button class="btn" id="fit-btn" type="button" title="Fit to viewport">Fit</button>
+            <button class="btn" id="share-btn" type="button" title="Copy shareable link">Share</button>${showDownloadButton ? `
             <button class="btn btn-primary" id="download-btn" type="button" title="Download">
               ${downloadIcon}
               Download
@@ -110,6 +112,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   const gridToggle = mustGet<HTMLInputElement>(root, "#grid-toggle");
   const gridUnits = mustGet<HTMLSelectElement>(root, "#grid-units");
   const fitBtn = mustGet<HTMLButtonElement>(root, "#fit-btn");
+  const shareBtn = mustGet<HTMLButtonElement>(root, "#share-btn");
   const downloadBtn = showDownloadButton ? mustGet<HTMLButtonElement>(root, "#download-btn") : null;
   const radios = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="side"]'));
   const layerMenuBtn = mustGet<HTMLButtonElement>(root, "#layer-menu-btn");
@@ -264,6 +267,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   let didInteract = false;
   // Ids of layer passes registered on the last updateRenderPasses() (for teardown).
   let registeredLayerPassIds: string[] = [];
+  // Whether a shared #gv= view state has been applied (only on first load).
+  let hashApplied = false;
 
   // Layer images as render passes with board clipping
   function createImagePass(id: string, order: number, imageUrl: string | undefined) {
@@ -623,6 +628,13 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   });
 
   fitBtn.addEventListener("click", () => fitBoardToViewport(0.08));
+
+  shareBtn.addEventListener("click", async () => {
+    await copyShareLink();
+    const prev = shareBtn.textContent;
+    shareBtn.textContent = "Copied!";
+    setTimeout(() => { shareBtn.textContent = prev; }, 1200);
+  });
   downloadBtn?.addEventListener("click", () => opts.onDownload?.());
 
   layerMenuBtn.addEventListener("click", (e) => {
@@ -704,6 +716,12 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     updateRenderPasses();
     resizeCanvas();
     fitBoardToViewport(0.08);
+
+    // On first load, restore a shared view (#gv=…) if present in the URL.
+    if (!hashApplied) {
+      hashApplied = true;
+      applyStateFromHash();
+    }
   }
 
   function setSideMode(mode: ViewerSideMode) {
@@ -822,6 +840,69 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     }
   }
 
+  // --- Shareable view state (M5) ---
+
+  function getViewState(): ViewState {
+    const cam = viewer.getCamera();
+    return {
+      v: 1,
+      side: sideMode,
+      cam: { x: cam.center_mm.x, y: cam.center_mm.y, zoom: cam.zoom, rot: cam.rotation_rad || 0 },
+      visible: { ...layerVisible },
+      grid: gridToggle.checked,
+      units: (gridUnits.value as "mm" | "in"),
+    };
+  }
+
+  function setViewState(s: ViewState) {
+    if (s.units) gridUnits.value = s.units;
+    if (typeof s.grid === "boolean") {
+      gridToggle.checked = s.grid;
+      gridOverlay.visible = s.grid;
+      visibility.setOverlayVisibility("grid", s.grid);
+    }
+    if (s.side) {
+      sideMode = s.side;
+      const r = radios.find((x) => x.value === s.side);
+      if (r) r.checked = true;
+    }
+    if (s.visible) Object.assign(layerVisible, s.visible);
+    updateRenderPasses();
+    if (s.cam) {
+      viewer.setCamera({ center_mm: { x: s.cam.x, y: s.cam.y }, zoom: s.cam.zoom, rotation_rad: s.cam.rot ?? 0 });
+    }
+    didInteract = true; // keep auto-fit from overriding a restored view
+    viewer.requestRender("view-state");
+  }
+
+  /** A shareable URL encoding the current side, camera, visibility, and grid. */
+  function getShareUrl(): string {
+    const url = new URL(location.href);
+    url.hash = `gv=${encodeViewState(getViewState())}`;
+    return url.toString();
+  }
+
+  async function copyShareLink(): Promise<string> {
+    const url = getShareUrl();
+    location.hash = `gv=${encodeViewState(getViewState())}`;
+    try {
+      await navigator.clipboard?.writeText(url);
+    } catch {
+      /* clipboard may be unavailable; the URL is still in the address bar */
+    }
+    return url;
+  }
+
+  /** Apply a `#gv=…` view state from the current URL hash, if present. */
+  function applyStateFromHash(): boolean {
+    const m = /(?:^|[#&])gv=([^&]+)/.exec(location.hash || "");
+    if (!m) return false;
+    const s = decodeViewState(m[1]);
+    if (!s) return false;
+    setViewState(s);
+    return true;
+  }
+
   // --- Revision diff overlay (M4) ---
 
   let diffState: { result: DiffResult; topImg?: HTMLImageElement; bottomImg?: HTMLImageElement } | null = null;
@@ -895,6 +976,12 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     // Revision diff overlay
     showDiff,
     hideDiff,
+    // Shareable view state
+    getViewState,
+    setViewState,
+    getShareUrl,
+    copyShareLink,
+    applyStateFromHash,
     // Expose new render pipeline API
     viewer,
     visibility,
