@@ -9,7 +9,7 @@ export { ViewportTransform } from './render-pipeline/core/viewportTransform';
 export { Viewer } from './render-pipeline/viewer';
 export { RenderScheduler } from './render-pipeline/core/renderScheduler';
 export { VisibilityManager } from './render-pipeline/visibilityManager';
-export { createIntegratedViewer, type IntegratedViewerOptions } from './render-pipeline/integratedViewer';
+export { createIntegratedViewer, createIntegratedViewer as createBoardViewer, type IntegratedViewerOptions, } from './render-pipeline/integratedViewer';
 export { OverlayRegistry } from './render-pipeline/overlayRegistry';
 export { createOverlayPass } from './render-pipeline/overlayPass';
 export { createViolationDotsOverlay, createTooltipOverlay, createGridOverlay, createPulsingMarkerOverlay } from './render-pipeline/exampleOverlays';
