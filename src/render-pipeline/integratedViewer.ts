@@ -3,6 +3,8 @@ import type { BoardGeom, ViewerLayers, ViewerSideMode, BoardStackup, CopperLayer
 import type { RenderCtx, OverlayApi, Marker as DfmMarker } from './core/renderContract';
 import { Viewer } from './viewer';
 import { dfmToBoardCoordinates } from './dfmCoordinateAdapter';
+import { composeStackToSvg } from '../render/headless';
+import type { SvgRenderResult } from '../render/renderGerbersFiles';
 import {
   OverlayRegistry, 
   MarkerRenderer, 
@@ -71,6 +73,18 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
               <div class="layer-panel" id="layer-panel" hidden></div>
             </div>
 
+            <div class="layer-dropdown" id="export-dropdown">
+              <button class="btn" id="export-menu-btn" type="button" title="Export image">
+                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:14px;height:14px"><path d="M8 1v9M4.5 6.5L8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Export
+              </button>
+              <div class="layer-panel" id="export-panel" hidden>
+                <button class="export-item" type="button" data-export="png-view">PNG — current view</button>
+                <button class="export-item" type="button" data-export="png-board">PNG — full board</button>
+                <button class="export-item" type="button" data-export="svg-board">SVG — full board</button>
+              </div>
+            </div>
+
             <button class="btn" id="fit-btn" type="button" title="Fit to viewport">Fit</button>${showDownloadButton ? `
             <button class="btn btn-primary" id="download-btn" type="button" title="Download">
               ${downloadIcon}
@@ -99,6 +113,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   const radios = Array.from(root.querySelectorAll<HTMLInputElement>('input[name="side"]'));
   const layerMenuBtn = mustGet<HTMLButtonElement>(root, "#layer-menu-btn");
   const layerPanel = mustGet<HTMLDivElement>(root, "#layer-panel");
+  const exportMenuBtn = mustGet<HTMLButtonElement>(root, "#export-menu-btn");
+  const exportPanel = mustGet<HTMLDivElement>(root, "#export-panel");
 
   // Initialize render pipeline
   const viewer = new Viewer(canvas, {
@@ -615,10 +631,36 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     layerMenuBtn.classList.toggle("active", !open);
   });
   // Close on outside click
+  exportMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = !exportPanel.hidden;
+    exportPanel.hidden = open;
+    exportMenuBtn.classList.toggle("active", !open);
+  });
+  exportPanel.querySelectorAll<HTMLButtonElement>(".export-item").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      exportPanel.hidden = true;
+      exportMenuBtn.classList.remove("active");
+      const kind = btn.dataset.export;
+      try {
+        if (kind === "png-view") await exportPng("view");
+        else if (kind === "png-board") await exportPng("board");
+        else if (kind === "svg-board") await exportSvg();
+      } catch (err) {
+        console.error("Export failed:", err);
+      }
+    });
+  });
+
   const onDocumentClick = (e: MouseEvent) => {
-    if (!layerPanel.hidden && !layerPanel.contains(e.target as Node) && e.target !== layerMenuBtn) {
+    const t = e.target as Node;
+    if (!layerPanel.hidden && !layerPanel.contains(t) && e.target !== layerMenuBtn) {
       layerPanel.hidden = true;
       layerMenuBtn.classList.remove("active");
+    }
+    if (!exportPanel.hidden && !exportPanel.contains(t) && e.target !== exportMenuBtn) {
+      exportPanel.hidden = true;
+      exportMenuBtn.classList.remove("active");
     }
   };
   document.addEventListener("click", onDocumentClick);
@@ -673,6 +715,112 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   // Convert a marker's absolute Gerber coords (Y up) into the renderer's world
   // space (Y flipped), matching how the layer images are placed. Without this,
   // markers land mirrored/offset relative to the board.
+  // --- Image / SVG export (M3) ---
+
+  function downloadBlob(blob: Blob, filename: string) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function loadImageEl(url: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error("Failed to load composed SVG for export"));
+      img.src = url;
+    });
+  }
+
+  // Copper layers (besides the current outer) that the user has revealed.
+  function revealedIds(): string[] {
+    if (!stackup) return [];
+    const outer = stackup.copper.find((c) => c.role === (sideMode === "top" ? "top" : "bottom"));
+    return stackup.copper
+      .filter((c) => c.id !== outer?.id && (layerVisible[c.id] ?? false))
+      .map((c) => c.id);
+  }
+
+  // Reconstruct the pure SVG document set from the viewer's blob-URL layers so
+  // we can reuse the headless composeStackToSvg() for crisp SVG/PNG export.
+  async function reconstructSvgDocs(): Promise<SvgRenderResult | null> {
+    if (!boardGeom || !stackup) return null;
+    const mm = boardGeom.board.mm_bounds;
+    const wMm = mm.max_x_mm - mm.min_x_mm;
+    const hMm = mm.max_y_mm - mm.min_y_mm;
+    const K = 1000 / 25.4; // px per mm, matches the render resolution
+    const wPx = Math.max(1, Math.round(wMm * K));
+    const hPx = Math.max(1, Math.round(hMm * K));
+
+    const svgById: Record<string, string> = {};
+    const jobs: Promise<void>[] = [];
+    const load = (id: string, url?: string): string | undefined => {
+      if (!url) return undefined;
+      jobs.push(fetch(url).then((r) => r.text()).then((t) => { svgById[id] = t; }));
+      return id;
+    };
+
+    const boardMaskId = load("board_mask", layers.top_board_mask);
+    const copper = stackup.copper.map((c) => ({
+      id: c.id, index: c.index, role: c.role, name: c.name, color: c.color,
+      svgId: load(c.id, c.url)!,
+    }));
+    const top = stackup.top
+      ? { maskId: load("top:mask", stackup.top.mask), silkId: load("top:silk", stackup.top.silk), pasteId: load("top:paste", stackup.top.paste) }
+      : undefined;
+    const bottom = stackup.bottom
+      ? { maskId: load("bottom:mask", stackup.bottom.mask), silkId: load("bottom:silk", stackup.bottom.silk), pasteId: load("bottom:paste", stackup.bottom.paste) }
+      : undefined;
+    const drillsId = load("drills", stackup.drills);
+
+    await Promise.all(jobs);
+
+    return {
+      boardGeom, bounds: { minX: mm.min_x_mm, minY: mm.min_y_mm, maxX: mm.max_x_mm, maxY: mm.max_y_mm },
+      wPx, hPx, svgById, boardMaskId, copper, top, bottom, drillsId, viasId: undefined,
+    };
+  }
+
+  async function exportSvg() {
+    const docs = await reconstructSvgDocs();
+    if (!docs) return;
+    const svg = composeStackToSvg(docs, { side: sideMode, revealed: revealedIds() });
+    downloadBlob(new Blob([svg], { type: "image/svg+xml" }), `board-${sideMode}.svg`);
+  }
+
+  async function exportPng(mode: "view" | "board" = "view", scale = 2) {
+    if (mode === "view") {
+      await new Promise<void>((resolve) => {
+        canvas.toBlob((b) => { if (b) downloadBlob(b, `board-${sideMode}-view.png`); resolve(); }, "image/png");
+      });
+      return;
+    }
+    const docs = await reconstructSvgDocs();
+    if (!docs) return;
+    const svg = composeStackToSvg(docs, { side: sideMode, revealed: revealedIds() });
+    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
+    try {
+      const img = await loadImageEl(url);
+      const c = document.createElement("canvas");
+      const MAX = 8000;
+      c.width = Math.min(MAX, Math.max(1, Math.round(docs.wPx * scale)));
+      c.height = Math.min(MAX, Math.max(1, Math.round(docs.hPx * scale)));
+      const ctx = c.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      await new Promise<void>((resolve) => {
+        c.toBlob((b) => { if (b) downloadBlob(b, `board-${sideMode}.png`); resolve(); }, "image/png");
+      });
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
   function gerberToWorldPos(x_mm: number, y_mm: number): { x: number; y: number } {
     const b = boardGeom?.board?.mm_bounds;
     if (!b) return { x: x_mm, y: y_mm };
@@ -700,6 +848,9 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     setSideMode,
     fit: () => fitBoardToViewport(0.08),
     dispose,
+    // Image / SVG export
+    exportPng,
+    exportSvg,
     // Expose new render pipeline API
     viewer,
     visibility,
