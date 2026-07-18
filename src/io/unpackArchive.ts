@@ -6,7 +6,7 @@ import { GerberError } from "../core/errors";
 type ArchiveInit = { workerUrl?: string };
 
 export type UnpackResult = {
-  archiveType: "zip" | "rar";
+  archiveType: "zip" | "rar" | "single-file";
   files: Record<string, Uint8Array>;
 };
 
@@ -69,6 +69,8 @@ async function unzipBytes(bytes: Uint8Array): Promise<Record<string, Uint8Array>
       }
       out[name] = new Uint8Array(ab);
     } catch (error) {
+      // Never swallow our own guard errors (e.g. the size-limit abort above).
+      if (error instanceof GerberError) throw error;
       console.warn(`Failed to extract file ${rawName}:`, error);
     }
   }
@@ -166,6 +168,8 @@ async function unrarBytes(bytes: Uint8Array, init?: ArchiveInit): Promise<Record
           
           out[normalizeName(path)] = new Uint8Array(ab);
         } catch (error) {
+          // Never swallow our own guard errors (e.g. the size-limit abort above).
+          if (error instanceof GerberError) throw error;
           console.warn(`Failed to extract file ${path}:`, error);
           // Continue with other files
         }
@@ -221,7 +225,11 @@ export async function unpackGerberArchive(
     throw new GerberError("PARSE_ERROR", "Failed to detect archive type", error);
   }
 
-  if (!det.isGerber) {
+  // RAR contents are not inspected during detection (the archive isn't unpacked
+  // there), so `isGerber` is not meaningful for rar — defer the verdict to
+  // extraction + classification. For every other type, isGerber:false means the
+  // bundle genuinely isn't a Gerber bundle.
+  if (!det.isGerber && det.archiveType !== "rar") {
     throw new GerberError(
       "NOT_GERBER",
       det.reasons.join("; ") || "Not a Gerber bundle",
@@ -236,6 +244,12 @@ export async function unpackGerberArchive(
 
     if (det.archiveType === 'rar') {
       return { archiveType: 'rar', files: await unrarBytes(bytes, init) };
+    }
+
+    if (det.archiveType === 'single-file') {
+      // A bare Gerber file (not an archive). Treat it as a one-entry bundle;
+      // name it so the classifier picks it up as a copper layer.
+      return { archiveType: 'single-file', files: { "layer.gtl": bytes } };
     }
 
     throw new GerberError(
