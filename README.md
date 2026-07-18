@@ -24,7 +24,7 @@ Designed for web apps, browser extensions, CI previews, manufacturing portals, a
 - Layer auto-detection for KiCad, Altium, Eagle, generic exports
 
 **Viewer**
-- Canvas-based render pipeline with hardware acceleration
+- Single-canvas 2D render pipeline (layers composited via `drawImage`)
 - Smooth pan / zoom with mouse-centered zoom
 - Top / bottom side switching
 - Per-layer visibility dropdown (on by default, toggleable)

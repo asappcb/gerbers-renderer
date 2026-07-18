@@ -66,8 +66,8 @@ src/
 - `visibilityPlumbing.test.ts`: Tests for visibility system integration
 
 ### Marker System (src/render-pipeline/)
-- `markerStore.ts`: High-performance marker storage with spatial indexing
-- `markerPicker.ts`: Efficient marker picking and selection
+- `markerStore.ts`: Spatial-indexed marker storage — available via the base `Viewer` API for large marker sets (the default integrated viewer uses a simpler linear-scan renderer)
+- `markerPicker.ts`: Marker picking and selection (base `Viewer` path)
 - `markerPass.ts`: Marker rendering pass with LOD
 - `markerSystem.test.ts`: Complete marker system tests
 
@@ -123,7 +123,7 @@ import {
 1. **Modern Architecture**: Canvas-based render pipeline with centralized systems
 2. **Event-Driven**: Typed event system for reactive interactions
 3. **Centralized Visibility**: Single source of truth for layer visibility
-4. **High Performance**: Spatial indexing for markers, efficient render scheduling
+4. **Performance**: Efficient on-demand render scheduling; optional spatial-indexed marker store (via the base `Viewer`) for large marker sets
 5. **Modularity**: Each component has a single responsibility
 6. **Maintainability**: Easy to locate and modify specific functionality
 7. **Testability**: Comprehensive test coverage for all systems
