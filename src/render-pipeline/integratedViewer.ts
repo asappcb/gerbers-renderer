@@ -1,24 +1,21 @@
 import "../viewer/viewer.css";
 import type { BoardGeom, ViewerLayers, ViewerSideMode, BoardStackup, CopperLayer } from '../viewer/types';
-import type { RenderCtx, OverlayApi, Marker as DfmMarker } from './core/renderContract';
+import type { RenderCtx, OverlayApi, Overlay, Marker as DfmMarker } from './core/renderContract';
 import { Viewer } from './viewer';
 import { dfmToBoardCoordinates } from './dfmCoordinateAdapter';
 import { composeStackToSvg } from '../render/headless';
 import type { SvgRenderResult } from '../render/renderGerbersFiles';
 import type { DiffResult } from '../render/diff';
 import { encodeViewState, decodeViewState, type ViewState } from './viewState';
-import {
-  OverlayRegistry, 
-  MarkerRenderer, 
-  SelectionRenderer,
-  createOverlayPass,
-  createMarkerPass,
-  createSelectionPass,
-  type Overlay,
-  type OverlayHelpers,
-  type Marker as RenderMarker,
-  type Selection
-} from './renderPasses';
+// Single, indexed marker/overlay system (spatial index + picking).
+import { OverlayRegistry } from './overlayRegistry';
+import { createOverlayPass } from './overlayPass';
+import { MarkerStore } from './markerStore';
+import { MarkerPicker } from './markerPicker';
+import { createMarkerPass } from './markerPass';
+import { SelectionRenderer, createSelectionPass, type Selection } from './renderPasses';
+import { Emitter } from './events';
+import type { ViewerEvents } from './viewerEvents';
 
 export type IntegratedViewerOptions = {
   onDownload?: () => void;
@@ -137,10 +134,19 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     viewer.requestRender("visibility-change");
   });
   const overlayRegistry = new OverlayRegistry();
-  const markerRenderer = new MarkerRenderer();
+  // Spatial-indexed marker store + picker (single marker system).
+  const markerStore = new MarkerStore();
+  const markerPicker = new MarkerPicker(markerStore);
+  let selectedMarkerId: string | null = null;
+  let hoverMarkerId: string | null = null;
+  // Event emitter for marker hover/select and board clicks.
+  const events = new Emitter<ViewerEvents>();
   // Give the selection renderer a way to look up a marker's board position so it
   // can highlight the real marker instead of a fixed placeholder rectangle.
-  const selectionRenderer = new SelectionRenderer((id) => markerRenderer.get(id)?.position);
+  const selectionRenderer = new SelectionRenderer((id) => {
+    const m = markerStore.get(id);
+    return m ? { x: m.x_mm, y: m.y_mm } : undefined;
+  });
   let currentSelection: Selection | null = null;
 
   // Set up canvas size. The backing store is sized in CSS pixels (not scaled by
@@ -162,73 +168,60 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     id: "grid",
     visible: false,
     zIndex: 10,
-    draw: (ctx: CanvasRenderingContext2D, helpers: OverlayHelpers) => {
-      const view = helpers.view;
-      const zoom = view.zoom;
+    drawInWorldSpace: false, // grid is drawn in screen space
+    draw: (ctx: CanvasRenderingContext2D, api: OverlayApi) => {
+      const zoom = api.getViewState().zoom;
       const units = gridUnits.value;
-      
+
       // Grid spacing in board coordinates (mm)
       const minorSpacing = units === "mm" ? 1 : 2.54; // 1mm or 0.1in (2.54mm)
       const majorSpacing = units === "mm" ? 10 : 25.4; // 10mm or 1in (25.4mm)
-      
-      // Convert to screen coordinates
+
       const minorScreen = minorSpacing * zoom;
       const majorScreen = majorSpacing * zoom;
-      
-      // Lower the density threshold to make grid more visible
-      if (minorScreen < 2) return; // Reduced from 6 to 2
-      
-      // Get viewport bounds in board coordinates (canvas is sized in CSS px)
-      const topLeft = helpers.screenToBoard({ x: 0, y: 0 });
-      const bottomRight = helpers.screenToBoard({ x: canvas.width, y: canvas.height });
-      
-      // Draw in screen space for crisp lines
+      if (minorScreen < 2) return;
+
+      // Viewport bounds in board coordinates (canvas is sized in CSS px)
+      const topLeft = api.screenToBoard({ x_px: 0, y_px: 0 });
+      const bottomRight = api.screenToBoard({ x_px: canvas.width, y_px: canvas.height });
+
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      
-      // Minor grid - blue, visible but not overwhelming
-      ctx.strokeStyle = "rgba(59, 130, 246, 0.4)"; // Blue, moderate opacity
+
+      // Minor grid
+      ctx.strokeStyle = "rgba(59, 130, 246, 0.4)";
       ctx.lineWidth = 1;
-      
       ctx.beginPath();
-      
-      const startX = Math.floor(topLeft.x / minorSpacing) * minorSpacing;
-      const startY = Math.floor(topLeft.y / minorSpacing) * minorSpacing;
-      
-      for (let x = startX; x <= bottomRight.x; x += minorSpacing) {
-        const screenX = helpers.boardToScreen({ x, y: 0 }).x;
+      const startX = Math.floor(topLeft.x_mm / minorSpacing) * minorSpacing;
+      const startY = Math.floor(topLeft.y_mm / minorSpacing) * minorSpacing;
+      for (let x = startX; x <= bottomRight.x_mm; x += minorSpacing) {
+        const screenX = api.boardToScreen({ x_mm: x, y_mm: 0 }).x_px;
         ctx.moveTo(screenX, 0);
         ctx.lineTo(screenX, canvas.height);
       }
-      
-      for (let y = startY; y <= bottomRight.y; y += minorSpacing) {
-        const screenY = helpers.boardToScreen({ x: 0, y }).y;
+      for (let y = startY; y <= bottomRight.y_mm; y += minorSpacing) {
+        const screenY = api.boardToScreen({ x_mm: 0, y_mm: y }).y_px;
         ctx.moveTo(0, screenY);
         ctx.lineTo(canvas.width, screenY);
       }
-      
       ctx.stroke();
-      
-      // Major grid - darker blue, more prominent
-      if (majorScreen >= 8) { // Reduced from 12 to 8
-        ctx.strokeStyle = "rgba(59, 130, 246, 0.7)"; // Darker blue
+
+      // Major grid
+      if (majorScreen >= 8) {
+        ctx.strokeStyle = "rgba(59, 130, 246, 0.7)";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        
-        const majorStartX = Math.floor(topLeft.x / majorSpacing) * majorSpacing;
-        const majorStartY = Math.floor(topLeft.y / majorSpacing) * majorSpacing;
-        
-        for (let x = majorStartX; x <= bottomRight.x; x += majorSpacing) {
-          const screenX = helpers.boardToScreen({ x, y: 0 }).x;
+        const majorStartX = Math.floor(topLeft.x_mm / majorSpacing) * majorSpacing;
+        const majorStartY = Math.floor(topLeft.y_mm / majorSpacing) * majorSpacing;
+        for (let x = majorStartX; x <= bottomRight.x_mm; x += majorSpacing) {
+          const screenX = api.boardToScreen({ x_mm: x, y_mm: 0 }).x_px;
           ctx.moveTo(screenX, 0);
           ctx.lineTo(screenX, canvas.height);
         }
-        
-        for (let y = majorStartY; y <= bottomRight.y; y += majorSpacing) {
-          const screenY = helpers.boardToScreen({ x: 0, y: y }).y;
+        for (let y = majorStartY; y <= bottomRight.y_mm; y += majorSpacing) {
+          const screenY = api.boardToScreen({ x_mm: 0, y_mm: y }).y_px;
           ctx.moveTo(0, screenY);
           ctx.lineTo(canvas.width, screenY);
         }
-        
         ctx.stroke();
       }
     },
@@ -243,7 +236,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
 
   // Add render passes
   viewer.addPass(createOverlayPass(overlayRegistry, viewer.getOverlayApi()));
-  viewer.addPass(createMarkerPass(markerRenderer));
+  viewer.addPass(createMarkerPass(markerStore, () => ({ selectedId: selectedMarkerId, hoverId: hoverMarkerId })));
   viewer.addPass(createSelectionPass(selectionRenderer, () => currentSelection));
 
   // Per-pass visibility (true by default; inner copper defaults to hidden)
@@ -570,6 +563,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   }, { passive: false });
 
   let isDragging = false;
+  let dragMoved = false;
   let dragStartBoard: { x: number; y: number } | null = null;
 
   canvas.addEventListener("mousedown", (event) => {
@@ -578,6 +572,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     didInteract = true;
 
     isDragging = true;
+    dragMoved = false;
     const rect = canvas.getBoundingClientRect();
     dragStartBoard = viewer.screenToBoard(
       event.clientX - rect.left,
@@ -585,9 +580,30 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     );
   });
 
+  // Hover picking (skipped while panning to avoid churn).
+  canvas.addEventListener("mousemove", (event) => {
+    if (isDragging) return;
+    setHoverMarker(pickAt(event.clientX, event.clientY).hit?.id ?? null);
+  });
+
+  // Click: select a marker under the cursor, else emit a board click. Suppressed
+  // after a drag so panning doesn't clear/alter the selection.
+  canvas.addEventListener("click", (event) => {
+    if (dragMoved) return;
+    const { hit, rc, x_px, y_px } = pickAt(event.clientX, event.clientY);
+    if (hit) {
+      setSelectedMarker(hit.id);
+    } else {
+      setSelectedMarker(null);
+      const b = rc.screenToBoard({ x: x_px, y: y_px });
+      events.emit("click:board", { x_mm: b.x, y_mm: b.y });
+    }
+  });
+
   const onMove = (event: MouseEvent) => {
     if (!isDragging || !dragStartBoard) return;
-    
+    dragMoved = true;
+
     const rect = canvas.getBoundingClientRect();
     const currentBoard = viewer.screenToBoard(
       event.clientX - rect.left,
@@ -963,6 +979,45 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     viewer.requestRender("diff-hide");
   }
 
+  // Convert an input DFM marker (absolute Gerber coords, Y up) into a store
+  // marker (world coords), validating the coordinates. Returns null if invalid.
+  function toStoreMarker(marker: DfmMarker): DfmMarker | null {
+    if (typeof marker.x_mm !== "number" || typeof marker.y_mm !== "number" ||
+        !isFinite(marker.x_mm) || !isFinite(marker.y_mm)) {
+      console.warn(`Invalid marker coordinates for ${marker.id}:`, { x_mm: marker.x_mm, y_mm: marker.y_mm });
+      return null;
+    }
+    const world = gerberToWorldPos(marker.x_mm, marker.y_mm);
+    return { ...marker, x_mm: world.x, y_mm: world.y };
+  }
+
+  function setHoverMarker(id: string | null) {
+    if (id === hoverMarkerId) return;
+    hoverMarkerId = id;
+    events.emit("hover:marker", id ? { markerId: id, marker: markerStore.get(id) } : { markerId: null });
+    viewer.requestRender("hover-change");
+  }
+
+  function setSelectedMarker(id: string | null) {
+    if (id === selectedMarkerId) return;
+    selectedMarkerId = id;
+    events.emit("select:marker", id ? { markerId: id, marker: markerStore.get(id) } : { markerId: null });
+    viewer.requestRender("selection-change");
+  }
+
+  // Minimal render-context shim so MarkerPicker can hit-test against the live camera.
+  function pickAt(clientX: number, clientY: number) {
+    const rect = canvas.getBoundingClientRect();
+    const x_px = clientX - rect.left;
+    const y_px = clientY - rect.top;
+    const rc = {
+      screenToBoard: (p: { x: number; y: number }) => viewer.screenToBoard(p.x, p.y),
+      boardToScreen: (p: { x: number; y: number }) => viewer.boardToScreen(p.x, p.y),
+      xform: { getCamera: () => viewer.getCamera() },
+    } as unknown as RenderCtx;
+    return { hit: markerPicker.pick(rc, x_px, y_px, 10), x_px, y_px, rc };
+  }
+
   function gerberToWorldPos(x_mm: number, y_mm: number): { x: number; y: number } {
     const b = boardGeom?.board?.mm_bounds;
     if (!b) return { x: x_mm, y: y_mm };
@@ -1002,78 +1057,44 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     getShareUrl,
     copyShareLink,
     applyStateFromHash,
+    // Event subscription (hover:marker, select:marker, click:board)
+    on: events.on.bind(events),
+    off: events.off.bind(events),
+    once: events.once.bind(events),
     // Expose new render pipeline API
     viewer,
     visibility,
     overlayRegistry,
-    markerRenderer,
+    markerStore,
+    markerPicker,
     setSelection: (selection: Selection | null) => {
       currentSelection = selection;
       viewer.requestRender("selection-change");
     },
     addMarker: (marker: DfmMarker) => {
-      // Validate marker before adding
-      if (typeof marker.x_mm !== 'number' || typeof marker.y_mm !== 'number' || 
-          !isFinite(marker.x_mm) || !isFinite(marker.y_mm)) {
-        console.warn(`Invalid marker coordinates for ${marker.id}:`, { 
-          x_mm: marker.x_mm, 
-          y_mm: marker.y_mm, 
-          marker: marker,
-          keys: Object.keys(marker)
-        });
-        return;
-      }
-      
-      // Convert DFM marker to render marker
-      const renderMarker: RenderMarker = {
-        id: marker.id,
-        position: gerberToWorldPos(marker.x_mm, marker.y_mm),
-        type: 'custom', // Default type for DFM markers
-        data: {
-          ...marker.data,
-          severity: marker.severity,
-          layer: marker.layer,
-          radius_mm: marker.radius_mm
-        }
-      };
-      
-      markerRenderer.add(renderMarker);
+      const m = toStoreMarker(marker);
+      if (!m) return;
+      markerStore.add(m);
       viewer.requestRender("marker-added");
     },
     addMarkers: (markers: DfmMarker[]) => {
-      for (const marker of markers) {
-        // Validate each marker before adding
-        if (typeof marker.x_mm !== 'number' || typeof marker.y_mm !== 'number' || 
-            !isFinite(marker.x_mm) || !isFinite(marker.y_mm)) {
-          console.warn(`Invalid marker coordinates for ${marker.id}:`, { 
-            x_mm: marker.x_mm, 
-            y_mm: marker.y_mm, 
-            marker: marker,
-            keys: Object.keys(marker)
-          });
-          continue;
-        }
-        
-        // Convert DFM marker to render marker
-        const renderMarker: RenderMarker = {
-          id: marker.id,
-          position: { x: marker.x_mm, y: marker.y_mm },
-          type: 'custom', // Default type for DFM markers
-          data: {
-            ...marker.data,
-            severity: marker.severity,
-            layer: marker.layer,
-            radius_mm: marker.radius_mm
-          }
-        };
-        
-        markerRenderer.add(renderMarker);
-      }
+      const valid = markers.map(toStoreMarker).filter(Boolean) as DfmMarker[];
+      markerStore.addMany(valid);
       viewer.requestRender("markers-added");
     },
     removeMarker: (id: string) => {
-      markerRenderer.remove(id);
+      markerStore.remove(id);
+      if (selectedMarkerId === id) selectedMarkerId = null;
+      if (hoverMarkerId === id) hoverMarkerId = null;
       viewer.requestRender("marker-removed");
+    },
+    /** Programmatically select a marker (highlights it and emits select:marker). */
+    selectMarker: (id: string | null) => setSelectedMarker(id),
+    clearMarkers: () => {
+      markerStore.clear();
+      selectedMarkerId = null;
+      hoverMarkerId = null;
+      viewer.requestRender("markers-cleared");
     },
   };
 }

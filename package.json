@@ -25,7 +25,8 @@
     "build": "vite build",
     "build:demo": "vite build --config vite.demo.config.ts --mode production",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "prepack": "vite build"
   },
   "repository": {
     "type": "git",

@@ -912,8 +912,9 @@ export async function renderGerberSvgDocs(files: Record<string, Uint8Array>): Pr
   for (let i = 0; i < innerCopperPrimsN.length; i++) {
     const prims = innerCopperPrimsN[i];
     if (prims) {
-      const num = innerRefs[i]?.detectedNum ?? (i + 1);
-      innerCopperIds.push(emit(`cu.in${num}`, buildLayerSvgWithPolarityMask(prims, b, INNER_COLORS[i % INNER_COLORS.length], 1.0)));
+      // Id by physical ordinal (1-based among inners) — unique and matching the
+      // viewer's deriveStackup(); detectedNum is used only for the display label.
+      innerCopperIds.push(emit(`cu.in${i + 1}`, buildLayerSvgWithPolarityMask(prims, b, INNER_COLORS[i % INNER_COLORS.length], 1.0)));
     } else {
       innerCopperIds.push("");
     }
@@ -939,9 +940,9 @@ export async function renderGerberSvgDocs(files: Record<string, Uint8Array>): Pr
       const j = innerRefs.indexOf(ref);
       svgId = innerCopperIds[j] || undefined;
       color = INNER_COLORS[j % INNER_COLORS.length];
-      const label = ref.detectedNum ?? (j + 1);
-      name = `Inner ${label}`;
-      id = `cu.in${label}`;
+      // Label by detected number (e.g. In4 → "Inner 4"); id by ordinal for uniqueness.
+      name = `Inner ${ref.detectedNum ?? (j + 1)}`;
+      id = `cu.in${j + 1}`;
     }
     if (svgId) copper.push({ id, index: ref.index, role: ref.role, name, color, svgId });
   }

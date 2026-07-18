@@ -68,11 +68,10 @@ export { Emitter } from "./render-pipeline/events";
 export type { ViewerEvents } from "./render-pipeline/viewerEvents";
 
 // Render passes
-export { 
+export {
   SelectionRenderer,
   createGerberPass,
   createSelectionPass,
-  type OverlayHelpers,
   type Selection
 } from "./render-pipeline/renderPasses";
 export type { 
