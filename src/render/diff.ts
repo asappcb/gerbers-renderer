@@ -9,7 +9,7 @@
 import { renderGerberSvgDocs } from "./renderGerbersFiles";
 import { composeStackToSvg } from "./headless";
 import { unpackGerberArchive } from "../io/unpackArchive";
-import type { BoardGeom } from "../viewer/types";
+import type { BoardGeom, BoardGeometry, BoardFeature } from "../viewer/types";
 
 export type DiffInput = ArrayBuffer | Uint8Array | Record<string, Uint8Array>;
 
@@ -72,6 +72,64 @@ export interface DiffOptions {
 }
 
 const K = 1000 / 25.4; // px per mm — matches the render resolution
+
+// ---------------------------------------------------------------------------
+// Per-layer geometry diff (D1): compares parsed features (pads/traces/holes)
+// between two boards, reporting added/removed features per layer. Pure.
+// ---------------------------------------------------------------------------
+
+export interface LayerGeometryDiff {
+  added: BoardFeature[];
+  removed: BoardFeature[];
+  unchanged: number;
+}
+
+export interface GeometryDiff {
+  /** Keyed by layer id ("cu.top", "cu.in1", …) plus "drills" for holes. */
+  perLayer: Record<string, LayerGeometryDiff>;
+  summary: { addedCount: number; removedCount: number; unchangedCount: number };
+}
+
+function featureLayerKey(f: BoardFeature): string {
+  return f.kind === "hole" ? "drills" : f.layer;
+}
+
+// Tolerance-quantized identity key so tiny coordinate noise doesn't read as a change.
+function featureKey(f: BoardFeature, tol: number): string {
+  const q = (n: number) => Math.round(n / tol);
+  if (f.kind === "pad") return `pad|${f.layer}|${q(f.x_mm)}|${q(f.y_mm)}|${q(f.w_mm)}|${q(f.h_mm)}|${f.shape}`;
+  if (f.kind === "hole") return `hole|${q(f.x_mm)}|${q(f.y_mm)}|${q(f.diameter_mm)}`;
+  // Traces are undirected: order endpoints canonically.
+  const a: [number, number] = [q(f.x1_mm), q(f.y1_mm)];
+  const b: [number, number] = [q(f.x2_mm), q(f.y2_mm)];
+  const [p, r] = a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1]) ? [a, b] : [b, a];
+  return `trace|${f.layer}|${p[0]}|${p[1]}|${r[0]}|${r[1]}|${q(f.width_mm)}`;
+}
+
+/**
+ * Diff two boards' parsed geometry, per layer. A feature present only in B is
+ * "added", only in A is "removed". Coordinates are matched with a tolerance.
+ */
+export function diffGeometry(a: BoardGeometry, b: BoardGeometry, tol = 0.05): GeometryDiff {
+  const aByKey = new Map<string, BoardFeature>();
+  for (const f of a.features) aByKey.set(featureKey(f, tol), f);
+  const bByKey = new Map<string, BoardFeature>();
+  for (const f of b.features) bByKey.set(featureKey(f, tol), f);
+
+  const perLayer: Record<string, LayerGeometryDiff> = {};
+  const layer = (id: string) => (perLayer[id] ??= { added: [], removed: [], unchanged: 0 });
+
+  let addedCount = 0, removedCount = 0, unchangedCount = 0;
+  for (const [key, f] of bByKey) {
+    if (aByKey.has(key)) { layer(featureLayerKey(f)).unchanged++; unchangedCount++; }
+    else { layer(featureLayerKey(f)).added.push(f); addedCount++; }
+  }
+  for (const [key, f] of aByKey) {
+    if (!bByKey.has(key)) { layer(featureLayerKey(f)).removed.push(f); removedCount++; }
+  }
+
+  return { perLayer, summary: { addedCount, removedCount, unchangedCount } };
+}
 
 async function toFiles(input: DiffInput): Promise<Record<string, Uint8Array>> {
   if (input instanceof ArrayBuffer || input instanceof Uint8Array) {

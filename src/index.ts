@@ -10,17 +10,22 @@ export {
   composeStackToSvg,
   renderGerbersToSvg,
   renderGerbersToImage,
+  renderGerbersThumbnail,
 } from "./render/headless";
 export type {
   ComposeOptions,
   ImageOptions,
+  ThumbnailOptions,
   SvgRasterizer,
   HeadlessInput,
 } from "./render/headless";
 
 // Revision diff
-export { diffGerbers, computeDiffAlignment } from "./render/diff";
-export type { DiffResult, DiffSide, DiffOptions, DiffInput, DiffAlignment } from "./render/diff";
+export { diffGerbers, computeDiffAlignment, diffGeometry } from "./render/diff";
+export type {
+  DiffResult, DiffSide, DiffOptions, DiffInput, DiffAlignment,
+  GeometryDiff, LayerGeometryDiff,
+} from "./render/diff";
 
 // Shareable view state
 export { encodeViewState, decodeViewState } from "./render-pipeline/viewState";

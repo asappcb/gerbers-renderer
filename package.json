@@ -15,8 +15,12 @@
   },
   "unpkg": "./dist/gerbers-renderer.umd.js",
   "jsdelivr": "./dist/gerbers-renderer.umd.js",
+  "bin": {
+    "gerbers-render": "./bin/gerbers-render.mjs"
+  },
   "files": [
     "dist",
+    "bin",
     "README.md",
     "LICENSE"
   ],

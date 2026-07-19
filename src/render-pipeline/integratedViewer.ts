@@ -121,6 +121,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
           <canvas id="render-canvas"></canvas>
           <div class="board-viewer-hint">Scroll to zoom, drag to pan.</div>
           <div class="board-info-bar" id="info-bar" hidden></div>
+          <div class="board-diff-bar" id="diff-bar" hidden></div>
         </div>
       </div>
     </div>
@@ -145,6 +146,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   const infoMenuBtn = mustGet<HTMLButtonElement>(root, "#info-menu-btn");
   const infoPanel = mustGet<HTMLDivElement>(root, "#info-panel");
   const infoBar = mustGet<HTMLDivElement>(root, "#info-bar");
+  const diffBar = mustGet<HTMLDivElement>(root, "#diff-bar");
 
   // Initialize render pipeline
   const viewer = new Viewer(canvas, {
@@ -1362,11 +1364,22 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     };
     diffState = { result, topImg: mkImg(result.top?.url), bottomImg: mkImg(result.bottom?.url) };
     if (!viewer.getPass("diff:overlay")) viewer.addPass(diffOverlayPass);
+    // Summary bar with a legend + clear button.
+    const s = result.summary;
+    diffBar.innerHTML =
+      `<span class="diff-added">+${s.addedArea_mm2.toFixed(1)} mm²</span>` +
+      `<span class="diff-removed">−${s.removedArea_mm2.toFixed(1)} mm²</span>` +
+      (s.boardSizeChanged ? `<span class="diff-warn">board size changed</span>` : "") +
+      `<button class="diff-clear" type="button">Clear</button>`;
+    diffBar.hidden = false;
+    diffBar.querySelector<HTMLButtonElement>(".diff-clear")?.addEventListener("click", () => hideDiff());
     viewer.requestRender("diff-show");
   }
 
   function hideDiff() {
     diffState = null;
+    diffBar.hidden = true;
+    diffBar.innerHTML = "";
     viewer.removePass("diff:overlay");
     viewer.requestRender("diff-hide");
   }

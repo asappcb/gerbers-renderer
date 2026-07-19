@@ -356,6 +356,37 @@
 
 .info-row b { color: #0f172a; }
 
+.board-diff-bar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+  font-size: 12px;
+  border-radius: 8px;
+  z-index: 6;
+}
+
+.board-diff-bar .diff-added { color: #4ade80; font-weight: 600; }
+.board-diff-bar .diff-removed { color: #f87171; font-weight: 600; }
+.board-diff-bar .diff-warn { color: #fbbf24; }
+
+.board-diff-bar .diff-clear {
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  border-radius: 5px;
+  padding: 3px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+.board-diff-bar .diff-clear:hover { background: rgba(255, 255, 255, 0.28); }
+
 /* ── ──────────────────────────────────────────────────────────── */
 
 .board-clip {
