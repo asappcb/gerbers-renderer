@@ -44,81 +44,95 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
         </div>
 
         <div class="viewer-header-right">
-          <div class="controls">
-            <div class="segment" title="Side">
-              <input id="side-top" type="radio" name="side" value="top" checked />
-              <label for="side-top">Top</label>
+          <div class="controls" id="controls">
+            <div class="control-group">
+              <div class="segment" title="Side">
+                <input id="side-top" type="radio" name="side" value="top" checked />
+                <label for="side-top">Top</label>
+                <input id="side-bottom" type="radio" name="side" value="bottom" />
+                <label for="side-bottom">Bottom</label>
+              </div>
 
-              <input id="side-bottom" type="radio" name="side" value="bottom" />
-              <label for="side-bottom">Bottom</label>
-            </div>
+              <div class="layer-step" title="Step through copper layers">
+                <button class="btn btn-step" id="layer-prev" type="button" aria-label="Previous layer">◀</button>
+                <span id="layer-step-label">All</span>
+                <button class="btn btn-step" id="layer-next" type="button" aria-label="Next layer">▶</button>
+              </div>
 
-            <div class="layer-step" title="Step through copper layers">
-              <button class="btn btn-step" id="layer-prev" type="button" aria-label="Previous layer">◀</button>
-              <span id="layer-step-label">All</span>
-              <button class="btn btn-step" id="layer-next" type="button" aria-label="Next layer">▶</button>
-            </div>
-
-            <label class="toggle" title="Grid">
-              <input type="checkbox" id="grid-toggle" />
-              Grid
-            </label>
-
-            <div class="select" title="Grid units">
-              Units
-              <select id="grid-units">
-                <option value="in" selected>in</option>
-                <option value="mm">mm</option>
-              </select>
-            </div>
-
-            <div class="select" title="Board finish">
-              Finish
-              <select id="theme-select">
-                <option value="green" selected>Green</option>
-                <option value="blue">Blue</option>
-                <option value="red">Red</option>
-                <option value="black">Black</option>
-                <option value="white">White</option>
-                <option value="purple">Purple</option>
-              </select>
-            </div>
-
-            <div class="layer-dropdown" id="layer-dropdown">
-              <button class="btn" id="layer-menu-btn" type="button" title="Layer visibility">
-                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:14px;height:14px"><path d="M1 4h14M3 8h10M5 12h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-                Layers
-              </button>
-              <div class="layer-panel" id="layer-panel" hidden></div>
-            </div>
-
-            <button class="btn" id="measure-btn" type="button" title="Measure distance">Measure</button>
-
-            <div class="layer-dropdown" id="info-dropdown">
-              <button class="btn" id="info-menu-btn" type="button" title="Board info">Info</button>
-              <div class="layer-panel" id="info-panel" hidden></div>
-            </div>
-
-            <div class="layer-dropdown" id="export-dropdown">
-              <button class="btn" id="export-menu-btn" type="button" title="Export image">
-                <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:14px;height:14px"><path d="M8 1v9M4.5 6.5L8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                Export
-              </button>
-              <div class="layer-panel" id="export-panel" hidden>
-                <button class="export-item" type="button" data-export="png-view">PNG — current view</button>
-                <button class="export-item" type="button" data-export="png-board">PNG — full board</button>
-                <button class="export-item" type="button" data-export="svg-board">SVG — full board</button>
+              <div class="layer-dropdown" id="layer-dropdown">
+                <button class="btn" id="layer-menu-btn" type="button" title="Layer visibility">
+                  <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:14px;height:14px"><path d="M1 4h14M3 8h10M5 12h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                  Layers
+                </button>
+                <div class="layer-panel" id="layer-panel" hidden></div>
               </div>
             </div>
 
-            <button class="btn" id="fit-btn" type="button" title="Fit to viewport">Fit</button>
-            <button class="btn" id="view3d-btn" type="button" title="Toggle 3D view">3D</button>
-            <button class="btn" id="share-btn" type="button" title="Copy shareable link">Share</button>${showDownloadButton ? `
-            <button class="btn btn-primary" id="download-btn" type="button" title="Download">
-              ${downloadIcon}
-              Download
-            </button>` : ''}
+            <div class="control-divider"></div>
+
+            <div class="control-group">
+              <button class="btn" id="measure-btn" type="button" title="Measure distance">Measure</button>
+
+              <div class="layer-dropdown" id="info-dropdown">
+                <button class="btn" id="info-menu-btn" type="button" title="Board info">Info</button>
+                <div class="layer-panel" id="info-panel" hidden></div>
+              </div>
+
+              <div class="layer-dropdown" id="export-dropdown">
+                <button class="btn" id="export-menu-btn" type="button" title="Export image">
+                  <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:14px;height:14px"><path d="M8 1v9M4.5 6.5L8 10l3.5-3.5M2 13h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  Export
+                </button>
+                <div class="layer-panel" id="export-panel" hidden>
+                  <button class="export-item" type="button" data-export="png-view">PNG — current view</button>
+                  <button class="export-item" type="button" data-export="png-board">PNG — full board</button>
+                  <button class="export-item" type="button" data-export="svg-board">SVG — full board</button>
+                </div>
+              </div>
+
+              <button class="btn" id="view3d-btn" type="button" title="Toggle 3D view">3D</button>
+            </div>
+
+            <div class="control-divider"></div>
+
+            <div class="control-group">
+              <div class="layer-dropdown" id="display-dropdown">
+                <button class="btn btn-icon" id="display-menu-btn" type="button" title="Display settings" aria-label="Display settings">
+                  <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:15px;height:15px"><circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.4"/><path d="M8 1.5v2M8 12.5v2M14.5 8h-2M3.5 8h-2M12.6 3.4l-1.4 1.4M4.8 11.2l-1.4 1.4M12.6 12.6l-1.4-1.4M4.8 4.8L3.4 3.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+                </button>
+                <div class="layer-panel" id="display-panel" hidden>
+                  <label class="display-row"><span>Grid</span><input type="checkbox" id="grid-toggle" /></label>
+                  <label class="display-row"><span>Units</span>
+                    <select id="grid-units">
+                      <option value="in" selected>in</option>
+                      <option value="mm">mm</option>
+                    </select>
+                  </label>
+                  <label class="display-row"><span>Finish</span>
+                    <select id="theme-select">
+                      <option value="green" selected>Green</option>
+                      <option value="blue">Blue</option>
+                      <option value="red">Red</option>
+                      <option value="black">Black</option>
+                      <option value="white">White</option>
+                      <option value="purple">Purple</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+
+              <button class="btn" id="fit-btn" type="button" title="Fit to viewport">Fit</button>
+              <button class="btn" id="share-btn" type="button" title="Copy shareable link">Share</button>${showDownloadButton ? `
+              <button class="btn btn-primary" id="download-btn" type="button" title="Download">
+                ${downloadIcon}
+                Download
+              </button>` : ''}
+            </div>
           </div>
+
+          <button class="btn btn-icon toolbar-toggle" id="toolbar-toggle" type="button" title="Hide toolbar" aria-label="Toggle toolbar">
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:15px;height:15px"><path d="M12 6l-4 4-4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
         </div>
       </div>
 
@@ -148,6 +162,10 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   const layerPanel = mustGet<HTMLDivElement>(root, "#layer-panel");
   const exportMenuBtn = mustGet<HTMLButtonElement>(root, "#export-menu-btn");
   const exportPanel = mustGet<HTMLDivElement>(root, "#export-panel");
+  const displayMenuBtn = mustGet<HTMLButtonElement>(root, "#display-menu-btn");
+  const displayPanel = mustGet<HTMLDivElement>(root, "#display-panel");
+  const controlsEl = mustGet<HTMLDivElement>(root, "#controls");
+  const toolbarToggle = mustGet<HTMLButtonElement>(root, "#toolbar-toggle");
   const layerPrevBtn = mustGet<HTMLButtonElement>(root, "#layer-prev");
   const layerNextBtn = mustGet<HTMLButtonElement>(root, "#layer-next");
   const layerStepLabel = mustGet<HTMLSpanElement>(root, "#layer-step-label");
@@ -872,6 +890,22 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     infoMenuBtn.classList.toggle("active", willOpen);
   });
 
+  displayMenuBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    const open = !displayPanel.hidden;
+    displayPanel.hidden = open;
+    displayMenuBtn.classList.toggle("active", !open);
+  });
+  // Keep the display popover open while interacting with its controls.
+  displayPanel.addEventListener("click", (e) => e.stopPropagation());
+
+  // Collapse / expand the whole toolbar.
+  toolbarToggle.addEventListener("click", () => {
+    const collapsed = controlsEl.classList.toggle("collapsed");
+    toolbarToggle.classList.toggle("collapsed", collapsed);
+    toolbarToggle.title = collapsed ? "Show toolbar" : "Hide toolbar";
+  });
+
   const onDocumentClick = (e: MouseEvent) => {
     const t = e.target as Node;
     if (!layerPanel.hidden && !layerPanel.contains(t) && e.target !== layerMenuBtn) {
@@ -885,6 +919,10 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     if (!infoPanel.hidden && !infoPanel.contains(t) && e.target !== infoMenuBtn) {
       infoPanel.hidden = true;
       infoMenuBtn.classList.remove("active");
+    }
+    if (!displayPanel.hidden && !displayPanel.contains(t) && e.target !== displayMenuBtn) {
+      displayPanel.hidden = true;
+      displayMenuBtn.classList.remove("active");
     }
   };
   document.addEventListener("click", onDocumentClick);

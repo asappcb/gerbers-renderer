@@ -59,10 +59,54 @@
 .controls {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   font-size: 12px;
   color: #0f172a;
 }
+
+.controls.collapsed { display: none; }
+
+.control-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.control-divider {
+  width: 1px;
+  align-self: stretch;
+  min-height: 20px;
+  background: #e2e8f0;
+}
+
+.btn-icon {
+  padding: 6px;
+  line-height: 0;
+}
+
+.toolbar-toggle svg { transition: transform 0.15s ease; }
+.toolbar-toggle.collapsed svg { transform: rotate(180deg); }
+
+.display-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 12px;
+  font-size: 12px;
+  color: #334155;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.display-row select {
+  font-size: 12px;
+  padding: 2px 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 5px;
+}
+
+.display-row input[type="checkbox"] { accent-color: #0f172a; }
 
 .segment {
   display: inline-flex;
