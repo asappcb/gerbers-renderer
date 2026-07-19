@@ -228,6 +228,11 @@
   min-height: 0;
 }
 
+/* Header hidden → board reclaims the full height, no empty gap. */
+.viewer-header.collapsed ~ .viewer-body {
+  inset: 0;
+}
+
 #board-viewport {
   position: absolute;
   inset: 0;
