@@ -84,26 +84,40 @@ export async function createBoard3D(container: HTMLElement, opts: Board3DOptions
     slabGeom = new THREE.BoxGeometry(wMm, hMm, thick);
   }
   track(slabGeom);
-  const slabMat = track(new THREE.MeshStandardMaterial({ color: new THREE.Color(opts.substrateColor), roughness: 0.6, metalness: 0.1 }));
+  // With inner layers, make the substrate translucent so the whole stack is visible.
+  const hasInner = opts.stackup.copper.some((c) => c.role === "inner");
+  const slabMat = track(new THREE.MeshStandardMaterial({
+    color: new THREE.Color(opts.substrateColor),
+    roughness: 0.6,
+    metalness: 0.1,
+    transparent: hasInner,
+    opacity: hasInner ? 0.5 : 1,
+    side: THREE.DoubleSide,
+  }));
   group.add(new THREE.Mesh(slabGeom, slabMat));
 
-  // Copper faces: textured planes just above/below the slab.
+  // Copper layers: one textured plane per copper layer, at its depth in the stack.
   const texLoader = new THREE.TextureLoader();
-  const addCopper = (url: string | undefined, z: number, flip: boolean) => {
+  const addCopper = (url: string | undefined, z: number, flip: boolean, opacity: number) => {
     if (!url) return;
     const tex = track(texLoader.load(url));
     tex.colorSpace = THREE.SRGBColorSpace;
     const geom = track(new THREE.PlaneGeometry(wMm, hMm));
-    const mat = track(new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+    const mat = track(new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity, depthWrite: false, side: THREE.DoubleSide }));
     const mesh = new THREE.Mesh(geom, mat);
     mesh.position.z = z;
     if (flip) mesh.rotation.y = Math.PI; // mirror bottom side
     group.add(mesh);
   };
-  const top = opts.stackup.copper.find((c) => c.role === "top");
-  const bottom = opts.stackup.copper.find((c) => c.role === "bottom");
-  addCopper(top?.url, thick / 2 + 0.02, false);
-  addCopper(bottom?.url, -thick / 2 - 0.02, true);
+  const copper = opts.stackup.copper;
+  const n = copper.length;
+  copper.forEach((c, i) => {
+    // Distribute z from +thick/2 (top) down to -thick/2 (bottom).
+    const t = n > 1 ? i / (n - 1) : 0;
+    const bias = c.role === "top" ? 0.02 : c.role === "bottom" ? -0.02 : 0;
+    const z = thick / 2 - t * thick + bias;
+    addCopper(c.url, z, c.role === "bottom", c.role === "inner" ? 0.85 : 1);
+  });
 
   let raf = 0;
   let alive = true;
