@@ -129,15 +129,14 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
               </button>` : ''}
             </div>
           </div>
-
-          <button class="btn btn-icon toolbar-toggle" id="toolbar-toggle" type="button" title="Hide toolbar" aria-label="Toggle toolbar">
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:15px;height:15px"><path d="M12 6l-4 4-4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
         </div>
       </div>
 
       <div class="viewer-body">
         <div id="board-viewport">
+          <button class="header-toggle" id="header-toggle" type="button" title="Hide header" aria-label="Toggle header">
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:15px;height:15px"><path d="M4 10l4-4 4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
           <canvas id="render-canvas"></canvas>
           <div class="board-viewer-hint">Scroll to zoom, drag to pan.</div>
           <div class="board-info-bar" id="info-bar" hidden></div>
@@ -164,8 +163,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   const exportPanel = mustGet<HTMLDivElement>(root, "#export-panel");
   const displayMenuBtn = mustGet<HTMLButtonElement>(root, "#display-menu-btn");
   const displayPanel = mustGet<HTMLDivElement>(root, "#display-panel");
-  const controlsEl = mustGet<HTMLDivElement>(root, "#controls");
-  const toolbarToggle = mustGet<HTMLButtonElement>(root, "#toolbar-toggle");
+  const headerEl = mustGet<HTMLDivElement>(root, ".viewer-header");
+  const headerToggle = mustGet<HTMLButtonElement>(root, "#header-toggle");
   const layerPrevBtn = mustGet<HTMLButtonElement>(root, "#layer-prev");
   const layerNextBtn = mustGet<HTMLButtonElement>(root, "#layer-next");
   const layerStepLabel = mustGet<HTMLSpanElement>(root, "#layer-step-label");
@@ -899,11 +898,12 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   // Keep the display popover open while interacting with its controls.
   displayPanel.addEventListener("click", (e) => e.stopPropagation());
 
-  // Collapse / expand the whole toolbar.
-  toolbarToggle.addEventListener("click", () => {
-    const collapsed = controlsEl.classList.toggle("collapsed");
-    toolbarToggle.classList.toggle("collapsed", collapsed);
-    toolbarToggle.title = collapsed ? "Show toolbar" : "Hide toolbar";
+  // Hide / show the entire header (the floating button stays over the board).
+  headerToggle.addEventListener("click", () => {
+    const collapsed = headerEl.classList.toggle("collapsed");
+    headerToggle.classList.toggle("collapsed", collapsed);
+    headerToggle.title = collapsed ? "Show header" : "Hide header";
+    resizeCanvas(); // header gone → board fills the freed space
   });
 
   const onDocumentClick = (e: MouseEvent) => {
