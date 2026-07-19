@@ -53,6 +53,12 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
               <label for="side-bottom">Bottom</label>
             </div>
 
+            <div class="layer-step" title="Step through copper layers">
+              <button class="btn btn-step" id="layer-prev" type="button" aria-label="Previous layer">◀</button>
+              <span id="layer-step-label">All</span>
+              <button class="btn btn-step" id="layer-next" type="button" aria-label="Next layer">▶</button>
+            </div>
+
             <label class="toggle" title="Grid">
               <input type="checkbox" id="grid-toggle" />
               Grid
@@ -142,6 +148,9 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   const layerPanel = mustGet<HTMLDivElement>(root, "#layer-panel");
   const exportMenuBtn = mustGet<HTMLButtonElement>(root, "#export-menu-btn");
   const exportPanel = mustGet<HTMLDivElement>(root, "#export-panel");
+  const layerPrevBtn = mustGet<HTMLButtonElement>(root, "#layer-prev");
+  const layerNextBtn = mustGet<HTMLButtonElement>(root, "#layer-next");
+  const layerStepLabel = mustGet<HTMLSpanElement>(root, "#layer-step-label");
   const measureBtn = mustGet<HTMLButtonElement>(root, "#measure-btn");
   const infoMenuBtn = mustGet<HTMLButtonElement>(root, "#info-menu-btn");
   const infoPanel = mustGet<HTMLDivElement>(root, "#info-panel");
@@ -303,6 +312,9 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   let didInteract = false;
   // Ids of layer passes registered on the last updateRenderPasses() (for teardown).
   let registeredLayerPassIds: string[] = [];
+  // When set, isolate a single copper layer (index into stackup.copper) — the
+  // layer-stepper "traverse" mode. null = normal current-side view.
+  let soloIndex: number | null = null;
   // Whether a shared #gv= view state has been applied (only on first load).
   let hashApplied = false;
 
@@ -486,6 +498,21 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
       if (pass) { viewer.addPass(pass); registeredLayerPassIds.push(id); }
     };
 
+    // Traverse mode: isolate a single copper layer (ignores side/reveal state).
+    if (soloIndex !== null && stackup.copper[soloIndex]) {
+      const c = stackup.copper[soloIndex];
+      register("layer:fr4", 5, undefined, { fr4: true });
+      layerVisible[c.id] = true;
+      register(c.id, 25, c.url, { meta: { label: `${c.name} copper`, color: c.color } });
+      register("layer:drills", 70, stackup.drills);
+      updateStepLabel();
+      viewer.requestRender("solo-layer");
+      setTimeout(() => viewer.requestRender("solo-delayed"), 50);
+      rebuildLayerPanel();
+      return;
+    }
+    updateStepLabel();
+
     register("layer:fr4", 5, undefined, { fr4: true });
 
     // Only the current side's outer copper + its mask/silk/paste are shown by
@@ -515,6 +542,38 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     setTimeout(() => viewer.requestRender("side-switch-delayed"), 50);
 
     rebuildLayerPanel();
+  }
+
+  function updateStepLabel() {
+    if (soloIndex === null || !stackup) { layerStepLabel.textContent = "All"; return; }
+    const c = stackup.copper[soloIndex];
+    layerStepLabel.textContent = `${c?.name ?? "?"} ${soloIndex + 1}/${stackup.copper.length}`;
+  }
+
+  function resetInnerVisibility() {
+    if (!stackup) return;
+    for (const c of stackup.copper) if (c.role === "inner") layerVisible[c.id] = false;
+  }
+
+  /** Isolate a single copper layer by stack index (0 = top). null exits traverse mode. */
+  function soloCopperLayer(index: number | null) {
+    if (index === null) { soloIndex = null; resetInnerVisibility(); }
+    else if (stackup && index >= 0 && index < stackup.copper.length) soloIndex = index;
+    updateRenderPasses();
+  }
+
+  /** Step through the copper stack (delta ±1). Stepping past an end exits traverse mode. */
+  function stepLayer(delta: number) {
+    if (!stackup || !stackup.copper.length) return;
+    const n = stackup.copper.length;
+    if (soloIndex === null) {
+      soloIndex = delta > 0 ? 0 : n - 1;
+    } else {
+      const next = soloIndex + delta;
+      if (next < 0 || next >= n) { soloIndex = null; resetInnerVisibility(); }
+      else soloIndex = next;
+    }
+    updateRenderPasses();
   }
 
   function rebuildLayerPanel() {
@@ -732,6 +791,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   themeSelect.addEventListener("change", () => setBoardTheme(themeSelect.value));
 
   fitBtn.addEventListener("click", () => fitBoardToViewport(0.08));
+  layerPrevBtn.addEventListener("click", () => stepLayer(-1));
+  layerNextBtn.addEventListener("click", () => stepLayer(1));
 
   shareBtn.addEventListener("click", async () => {
     await copyShareLink();
@@ -831,6 +892,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   radios.forEach((r) => {
     r.addEventListener("change", () => {
       sideMode = (radios.find((x) => x.checked)?.value || "top") as ViewerSideMode;
+      // Switching side exits traverse mode and restores a clean current-side view.
+      if (soloIndex !== null) { soloIndex = null; resetInnerVisibility(); }
       updateRenderPasses();
     });
   });
@@ -1441,6 +1504,11 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   function activeCopperLayerIds(): Set<string> {
     const ids = new Set<string>();
     if (!stackup) return ids;
+    // In traverse (solo) mode only the isolated layer is shown.
+    if (soloIndex !== null && stackup.copper[soloIndex]) {
+      ids.add(stackup.copper[soloIndex].id);
+      return ids;
+    }
     const outer = stackup.copper.find((c) => c.role === (sideMode === "top" ? "top" : "bottom"));
     if (outer && (layerVisible[outer.id] ?? true)) ids.add(outer.id);
     for (const c of stackup.copper) {
@@ -1552,6 +1620,9 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     getStats: () => geometry?.stats ?? null,
     setBoardTheme,
     toggle3D,
+    // Layer traversal (step through the copper stack, or isolate one layer)
+    stepLayer,
+    soloCopperLayer,
     pickFeatureAt: (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect();
       const b = viewer.screenToBoard(clientX - rect.left, clientY - rect.top);

@@ -356,6 +356,25 @@
 
 .info-row b { color: #0f172a; }
 
+.layer-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.layer-step .btn-step {
+  padding: 4px 7px;
+  min-width: 0;
+  line-height: 1;
+}
+#layer-step-label {
+  min-width: 74px;
+  text-align: center;
+  font-size: 12px;
+  color: #334155;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .board-diff-bar[hidden] { display: none; }
 
 .board-diff-bar {
