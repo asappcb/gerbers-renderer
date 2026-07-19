@@ -356,6 +356,8 @@
 
 .info-row b { color: #0f172a; }
 
+.board-diff-bar[hidden] { display: none; }
+
 .board-diff-bar {
   position: absolute;
   top: 12px;
