@@ -134,15 +134,16 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
 
       <div class="viewer-body">
         <div id="board-viewport">
-          <button class="header-toggle" id="header-toggle" type="button" title="Hide header" aria-label="Toggle header">
-            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:15px;height:15px"><path d="M4 10l4-4 4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
           <canvas id="render-canvas"></canvas>
           <div class="board-viewer-hint">Scroll to zoom, drag to pan.</div>
           <div class="board-info-bar" id="info-bar" hidden></div>
           <div class="board-diff-bar" id="diff-bar" hidden></div>
         </div>
       </div>
+
+      <button class="header-toggle" id="header-toggle" type="button" title="Hide header" aria-label="Toggle header">
+        <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" style="width:15px;height:15px"><path d="M4 10l4-4 4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
     </div>
   `;
 
