@@ -122,7 +122,7 @@ inputEl.addEventListener("change", async (e) => {
     );
     lastRevoke = out.revoke;
 
-    v.setData({ boardGeom: out.boardGeom, layers: out.layers, stackup: out.stackup });
+    v.setData({ boardGeom: out.boardGeom, layers: out.layers, stackup: out.stackup, geometry: out.geometry });
     v.setSideMode("top");
     v.fit();
 

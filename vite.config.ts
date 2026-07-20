@@ -19,6 +19,16 @@ export default defineConfig({
         format === "es" ? "gerbers-renderer.es.js" : "gerbers-renderer.umd.js",
     },
     sourcemap: true,
+    rollupOptions: {
+      // three is an optional peer dependency (only used by the 3D view); keep it
+      // external so it isn't bundled into the library.
+      external: ["three", /^three\//],
+      output: { globals: { three: "THREE" } },
+    },
+  },
+  // The render worker is bundled as an ES module (UMD/IIFE can't code-split workers).
+  worker: {
+    format: "es",
   },
   // Base path for GitHub Pages
   base: process.env.NODE_ENV === 'production' ? '/gerbers-renderer/' : '/',

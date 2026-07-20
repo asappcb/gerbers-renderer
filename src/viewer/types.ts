@@ -72,3 +72,48 @@ export type ViewerLayers = Partial<{
 }>;
 
 export type ViewerSideMode = "top" | "bottom";
+
+/** A pickable board feature, in world coordinates (Y-flipped to viewer space). */
+export type PadFeature = {
+  kind: "pad";
+  layer: string;       // copper layer id, e.g. "cu.top"
+  x_mm: number;
+  y_mm: number;
+  w_mm: number;
+  h_mm: number;
+  shape: string;       // "C" | "R" | "O" | ...
+};
+export type HoleFeature = {
+  kind: "hole";
+  x_mm: number;
+  y_mm: number;
+  diameter_mm: number;
+};
+export type TraceFeature = {
+  kind: "trace";
+  layer: string;
+  x1_mm: number;
+  y1_mm: number;
+  x2_mm: number;
+  y2_mm: number;
+  width_mm: number;
+};
+export type BoardFeature = PadFeature | HoleFeature | TraceFeature;
+
+export type BoardStats = {
+  widthMm: number;
+  heightMm: number;
+  copperLayers: number;
+  padCount: number;
+  holeCount: number;
+  /** Unique drill diameters (mm), sorted ascending. */
+  drillSizesMm: number[];
+  /** Smallest trace width seen (mm), if any traces. */
+  minTraceWidthMm?: number;
+};
+
+/** Parsed geometry + summary stats, for inspection / measurement / connectivity. */
+export type BoardGeometry = {
+  features: BoardFeature[];
+  stats: BoardStats;
+};

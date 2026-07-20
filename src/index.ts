@@ -1,7 +1,8 @@
 export { renderGerbersZip } from "./render/renderGerbersZip";
 export { renderGerbers } from "./render/renderGerbers";
-export { renderGerbersFiles, renderGerberSvgDocs } from "./render/renderGerbersFiles";
+export { renderGerbersFiles, renderGerberSvgDocs, svgDocsToRenderResult } from "./render/renderGerbersFiles";
 export type { SvgRenderResult, SvgCopperRef } from "./render/renderGerbersFiles";
+export { renderGerbersInWorker, disposeRenderWorker } from "./render/renderGerbersWorker";
 export type { BoardStackup, CopperLayer } from "./viewer/types";
 
 // Headless / CI render + SVG compositor
@@ -9,17 +10,22 @@ export {
   composeStackToSvg,
   renderGerbersToSvg,
   renderGerbersToImage,
+  renderGerbersThumbnail,
 } from "./render/headless";
 export type {
   ComposeOptions,
   ImageOptions,
+  ThumbnailOptions,
   SvgRasterizer,
   HeadlessInput,
 } from "./render/headless";
 
 // Revision diff
-export { diffGerbers, computeDiffAlignment } from "./render/diff";
-export type { DiffResult, DiffSide, DiffOptions, DiffInput, DiffAlignment } from "./render/diff";
+export { diffGerbers, computeDiffAlignment, diffGeometry } from "./render/diff";
+export type {
+  DiffResult, DiffSide, DiffOptions, DiffInput, DiffAlignment,
+  GeometryDiff, LayerGeometryDiff,
+} from "./render/diff";
 
 // Shareable view state
 export { encodeViewState, decodeViewState } from "./render-pipeline/viewState";
@@ -29,6 +35,9 @@ export { detectGerberBundle } from "./core/detect";
 
 export type { RenderResult } from "./render/renderGerbersFiles";
 export type { BoardGeom, ViewerLayers, ViewerSideMode } from "./viewer/types";
+export type {
+  BoardGeometry, BoardFeature, BoardStats, PadFeature, HoleFeature, TraceFeature,
+} from "./viewer/types";
 export { GerberError } from "./core/errors";
 
 // New render pipeline system
@@ -68,11 +77,10 @@ export { Emitter } from "./render-pipeline/events";
 export type { ViewerEvents } from "./render-pipeline/viewerEvents";
 
 // Render passes
-export { 
+export {
   SelectionRenderer,
   createGerberPass,
   createSelectionPass,
-  type OverlayHelpers,
   type Selection
 } from "./render-pipeline/renderPasses";
 export type { 

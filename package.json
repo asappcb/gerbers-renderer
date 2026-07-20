@@ -15,8 +15,12 @@
   },
   "unpkg": "./dist/gerbers-renderer.umd.js",
   "jsdelivr": "./dist/gerbers-renderer.umd.js",
+  "bin": {
+    "gerbers-render": "./bin/gerbers-render.mjs"
+  },
   "files": [
     "dist",
+    "bin",
     "README.md",
     "LICENSE"
   ],
@@ -25,7 +29,8 @@
     "build": "vite build",
     "build:demo": "vite build --config vite.demo.config.ts --mode production",
     "preview": "vite preview",
-    "test": "vitest"
+    "test": "vitest",
+    "prepack": "vite build"
   },
   "repository": {
     "type": "git",
@@ -52,10 +57,20 @@
     "jszip": "^3.10.1",
     "libarchive.js": "^2.0.2"
   },
+  "peerDependencies": {
+    "three": ">=0.150.0"
+  },
+  "peerDependenciesMeta": {
+    "three": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@types/jszip": "^3.4.0",
     "@types/node": "^24.10.1",
+    "@types/three": "^0.181.0",
     "jsdom": "^27.4.0",
+    "three": "^0.181.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "vite": "^7.2.7",

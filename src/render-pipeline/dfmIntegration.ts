@@ -52,27 +52,19 @@ export function convertDfmViolationsToMarkers(
 }
 
 /**
- * Utility to add DFM violations to a marker renderer.
- * 
- * @param markerRenderer - The marker renderer instance
+ * Utility to add DFM violations to a marker store.
+ *
+ * @param markerStore - The MarkerStore instance
  * @param violations - Array of DFM violations
  * @param boardBounds - Board bounds in mm
  */
 export function addDfmViolationsToRenderer(
-  markerRenderer: any,
+  markerStore: { add: (m: import("./core/renderContract").Marker) => void },
   violations: DfmViolation[],
   boardBounds: BoardBounds
 ) {
   const markers = convertDfmViolationsToMarkers(violations, boardBounds);
 
-  // The integrated viewer's MarkerRenderer stores markers by board-space
-  // `position`, not `{x_mm, y_mm}`. Map to that shape so they actually render.
-  markers.forEach(marker => {
-    markerRenderer.add({
-      id: marker.id,
-      position: { x: marker.x_mm, y: marker.y_mm },
-      type: 'custom',
-      data: marker.data,
-    });
-  });
+  // The marker store consumes { id, x_mm, y_mm, ... } directly.
+  markers.forEach(marker => markerStore.add(marker));
 }
