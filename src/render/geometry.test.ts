@@ -49,4 +49,44 @@ describe("geometry extraction", () => {
     expect(g.stats.drillSizesMm).toEqual([0.8]);
     expect(g.stats.minTraceWidthMm).toBeCloseTo(1.5, 3);
   });
+
+  it("leaves clear-polarity (LPC) cut-outs out of the copper features", async () => {
+    const top = [
+      "%FSLAX44Y44*%", "%MOMM*%",
+      "%ADD10C,1.500*%",
+      "D10*",
+      "%LPD*%",
+      "X50000Y50000D03*",                       // real pad
+      "%LPC*%",
+      "X200000Y150000D03*",                     // cut-out flash
+      "X100000Y100000D02*", "X300000Y100000D01*", // cut-out track
+      "M02*",
+    ].join("\n");
+    const docs = await renderGerberSvgDocs({ "top.gtl": enc(top), "outline.gko": enc(OUTLINE) });
+    const g = docs.geometry;
+    expect(g.features.filter((f) => f.kind === "pad")).toHaveLength(1);
+    expect(g.features.filter((f) => f.kind === "trace")).toHaveLength(0);
+    expect(g.stats.padCount).toBe(1);
+  });
+
+  it("keeps round pad sizes on an auto-rescaled layer", async () => {
+    // Copper declares mm but its numbers are inches: ~25x smaller than the
+    // 40 mm outline, so the renderer rescales the layer by 25.4.
+    const top = [
+      "%FSLAX44Y44*%", "%MOMM*%",
+      "%ADD10C,0.0591*%",
+      "D10*",
+      "X2000Y2000D03*",
+      "X14000Y10000D03*",
+      "M02*",
+    ].join("\n");
+    const docs = await renderGerberSvgDocs({ "top.gtl": enc(top), "outline.gko": enc(OUTLINE) });
+    const pads = docs.geometry.features.filter((f) => f.kind === "pad");
+    expect(pads).toHaveLength(2);
+    for (const p of pads) {
+      if (p.kind !== "pad") continue;
+      expect(p.w_mm).toBeCloseTo(0.0591 * 25.4, 3);
+      expect(p.h_mm).toBeCloseTo(0.0591 * 25.4, 3);
+    }
+  });
 });

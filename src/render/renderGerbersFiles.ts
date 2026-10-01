@@ -41,8 +41,10 @@ function scaleGerberPrims(prims: ReturnType<typeof parseGerberFile>, s: number) 
       ...f,
       position: { x: f.position.x * s, y: f.position.y * s },
       diameterMm: (f.diameterMm ?? 0) * s,
-      widthMm: (f.widthMm ?? 0) * s,
-      heightMm: (f.heightMm ?? 0) * s,
+      // Keep "not set" as undefined: round pads have no width/height, and a 0
+      // here would win over diameterMm in `widthMm ?? diameterMm`.
+      widthMm: f.widthMm !== undefined ? f.widthMm * s : undefined,
+      heightMm: f.heightMm !== undefined ? f.heightMm * s : undefined,
       loops: f.loops?.map((loop) => loop.map((p) => ({ x: p.x * s, y: p.y * s }))),
     })),
     regions: prims.regions.map((r) => ({
@@ -990,12 +992,15 @@ export async function renderGerberSvgDocs(files: Record<string, Uint8Array>): Pr
   let minTraceW = Infinity;
   const addLayerFeatures = (prims: ReturnType<typeof parseGerberFile> | null, layerId: string) => {
     if (!prims) return;
+    // Clear-polarity (LPC) objects are cut-outs, not copper.
     for (const f of prims.flashes) {
+      if (f.polarity === "clear") continue;
       const w = f.widthMm ?? f.diameterMm ?? 0;
       const h = f.heightMm ?? f.diameterMm ?? 0;
       feats.push({ kind: "pad", layer: layerId, x_mm: f.position.x, y_mm: worldY(f.position.y), w_mm: w, h_mm: h, shape: f.shape });
     }
     for (const t of prims.tracks) {
+      if (t.polarity === "clear") continue;
       feats.push({ kind: "trace", layer: layerId, x1_mm: t.start.x, y1_mm: worldY(t.start.y), x2_mm: t.end.x, y2_mm: worldY(t.end.y), width_mm: t.width });
       if (t.width > 0) minTraceW = Math.min(minTraceW, t.width);
     }
