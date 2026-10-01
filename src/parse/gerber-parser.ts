@@ -74,8 +74,8 @@ interface Aperture {
   cornerMm?: number;
   macroName?: string;
   rotationDeg?: number;  // pad rotation in degrees
-  /** Evaluated macro shape in aperture-local mm, when the macro was defined via %AM. */
-  macroLoops?: Vec2[][];
+  /** Exact shape in aperture-local mm: an evaluated %AM macro, or a standard P polygon. */
+  outlineLoops?: Vec2[][];
 }
 
 export interface GerberPrimitiveFlash {
@@ -283,7 +283,7 @@ function handleParameterBlock(block: string, state: ParserState) {
         if (ap.diameterMm !== undefined) ap.diameterMm *= factor;
         if (ap.widthMm !== undefined) ap.widthMm *= factor;
         if (ap.heightMm !== undefined) ap.heightMm *= factor;
-        if (ap.macroLoops) ap.macroLoops = ap.macroLoops.map((l) => l.map((p) => ({ x: p.x * factor, y: p.y * factor })));
+        if (ap.outlineLoops) ap.outlineLoops = ap.outlineLoops.map((l) => l.map((p) => ({ x: p.x * factor, y: p.y * factor })));
       }
 
       state.unitScale = newScale;
@@ -309,19 +309,27 @@ function handleParameterBlock(block: string, state: ParserState) {
     const macro = state.macros.get(shape);
     if (macro) {
       const values = params.split(/[Xx]/).filter(Boolean).map((v) => parseFloat(v));
-      const macroLoops = evaluateMacro(macro, values, state.unitScale);
-      const ap: Aperture = { code, shape, macroName: shape, macroLoops };
-      if (macroLoops.length) {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (const loop of macroLoops) for (const p of loop) {
-          minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
-          minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+      const ap: Aperture = { code, shape, macroName: shape };
+      setOutline(ap, evaluateMacro(macro, values, state.unitScale));
+      state.apertures.set(code, ap);
+      return;
+    }
+
+    // Standard polygon: outer diameter, vertex count, [rotation], [hole].
+    // The first vertex sits on +X, rotated counter-clockwise by the rotation.
+    if (shape === "P") {
+      const [dia, verts, rot] = params.split(/[Xx]/).filter(Boolean).map((v) => parseFloat(v));
+      const ap: Aperture = { code, shape };
+      const n = Math.round(verts);
+      if (dia > 0 && n >= 3) {
+        const r = (dia * state.unitScale) / 2;
+        const t0 = ((Number.isFinite(rot) ? rot : 0) * Math.PI) / 180;
+        const pts: Vec2[] = [];
+        for (let i = 0; i < n; i++) {
+          const t = t0 + (2 * Math.PI * i) / n;
+          pts.push({ x: r * Math.cos(t), y: r * Math.sin(t) });
         }
-        // Symmetric extents about the flash point, so width/height-based
-        // consumers (bounds, effective diameter) cover the whole shape.
-        ap.widthMm = 2 * Math.max(Math.abs(minX), Math.abs(maxX));
-        ap.heightMm = 2 * Math.max(Math.abs(minY), Math.abs(maxY));
-        ap.diameterMm = Math.min(ap.widthMm, ap.heightMm);
+        setOutline(ap, [pts]);
       }
       state.apertures.set(code, ap);
       return;
@@ -330,7 +338,7 @@ function handleParameterBlock(block: string, state: ParserState) {
     // A macro name with no %AM definition: keep the old best-effort reading
     // (leading unsigned numbers as width/height) rather than feed it corner
     // coordinates as sizes.
-    const sizeParams = (shape === "C" || shape === "R" || shape === "O" || shape === "P")
+    const sizeParams = (shape === "C" || shape === "R" || shape === "O")
       ? params
       : (/^[0-9.Xx]*/.exec(params)?.[0] ?? "");
 
@@ -656,9 +664,9 @@ function handleCommandLine(line: string, state: ParserState) {
       if (ap.heightMm !== undefined) flash.heightMm = ap.heightMm;
       if (ap.cornerMm !== undefined) flash.cornerMm = ap.cornerMm;
 
-      // Macro apertures carry their real shape. Load rotation (%LR) applies;
+      // Macro and polygon apertures carry their real shape. Load rotation (%LR) applies;
       // the aperture's own rotation is already part of the macro geometry.
-      const loops = ap.macroLoops?.map((l) =>
+      const loops = ap.outlineLoops?.map((l) =>
         rotateLoop(l, state.loadRotationDeg).map((p) => ({ x: p.x + newX, y: p.y + newY }))
       );
       if (loops) flash.loops = loops;
@@ -686,6 +694,24 @@ function handleCommandLine(line: string, state: ParserState) {
 
 
   // Other D codes ignored for now
+}
+
+/**
+ * Attach an exact outline to an aperture, with symmetric extents about the
+ * flash point so width/height-based consumers (bounds, effective diameter)
+ * cover the whole shape.
+ */
+function setOutline(ap: Aperture, loops: Vec2[][]) {
+  ap.outlineLoops = loops;
+  if (!loops.length) return;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const loop of loops) for (const p of loop) {
+    minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+    minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+  }
+  ap.widthMm = 2 * Math.max(Math.abs(minX), Math.abs(maxX));
+  ap.heightMm = 2 * Math.max(Math.abs(minY), Math.abs(maxY));
+  ap.diameterMm = Math.min(ap.widthMm, ap.heightMm);
 }
 
 /**
