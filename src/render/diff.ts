@@ -94,16 +94,32 @@ function featureLayerKey(f: BoardFeature): string {
   return f.kind === "hole" ? "drills" : f.layer;
 }
 
-// Tolerance-quantized identity key so tiny coordinate noise doesn't read as a change.
-function featureKey(f: BoardFeature, tol: number): string {
-  const q = (n: number) => Math.round(n / tol);
-  if (f.kind === "pad") return `pad|${f.layer}|${q(f.x_mm)}|${q(f.y_mm)}|${q(f.w_mm)}|${q(f.h_mm)}|${f.shape}`;
-  if (f.kind === "hole") return `hole|${q(f.x_mm)}|${q(f.y_mm)}|${q(f.diameter_mm)}`;
-  // Traces are undirected: order endpoints canonically.
-  const a: [number, number] = [q(f.x1_mm), q(f.y1_mm)];
-  const b: [number, number] = [q(f.x2_mm), q(f.y2_mm)];
-  const [p, r] = a[0] < b[0] || (a[0] === b[0] && a[1] <= b[1]) ? [a, b] : [b, a];
-  return `trace|${f.layer}|${p[0]}|${p[1]}|${r[0]}|${r[1]}|${q(f.width_mm)}`;
+// Features match when they share kind/layer/shape and every size and
+// coordinate agrees within `tol`. Matching is one-to-one, so duplicate
+// features are counted, not merged.
+function sameFeature(a: BoardFeature, b: BoardFeature, tol: number): boolean {
+  const near = (x: number, y: number) => Math.abs(x - y) <= tol;
+  if (a.kind === "pad" && b.kind === "pad") {
+    return a.layer === b.layer && a.shape === b.shape &&
+      near(a.x_mm, b.x_mm) && near(a.y_mm, b.y_mm) && near(a.w_mm, b.w_mm) && near(a.h_mm, b.h_mm);
+  }
+  if (a.kind === "hole" && b.kind === "hole") {
+    return near(a.x_mm, b.x_mm) && near(a.y_mm, b.y_mm) && near(a.diameter_mm, b.diameter_mm);
+  }
+  if (a.kind === "trace" && b.kind === "trace") {
+    if (a.layer !== b.layer || !near(a.width_mm, b.width_mm)) return false;
+    // Traces are undirected.
+    const fwd = near(a.x1_mm, b.x1_mm) && near(a.y1_mm, b.y1_mm) && near(a.x2_mm, b.x2_mm) && near(a.y2_mm, b.y2_mm);
+    const rev = near(a.x1_mm, b.x2_mm) && near(a.y1_mm, b.y2_mm) && near(a.x2_mm, b.x1_mm) && near(a.y2_mm, b.y1_mm);
+    return fwd || rev;
+  }
+  return false;
+}
+
+// Spatial anchors for the grid index (a trace is indexed at both ends).
+function anchors(f: BoardFeature): Array<[number, number]> {
+  if (f.kind === "trace") return [[f.x1_mm, f.y1_mm], [f.x2_mm, f.y2_mm]];
+  return [[f.x_mm, f.y_mm]];
 }
 
 /**
@@ -111,22 +127,48 @@ function featureKey(f: BoardFeature, tol: number): string {
  * "added", only in A is "removed". Coordinates are matched with a tolerance.
  */
 export function diffGeometry(a: BoardGeometry, b: BoardGeometry, tol = 0.05): GeometryDiff {
-  const aByKey = new Map<string, BoardFeature>();
-  for (const f of a.features) aByKey.set(featureKey(f, tol), f);
-  const bByKey = new Map<string, BoardFeature>();
-  for (const f of b.features) bByKey.set(featureKey(f, tol), f);
+  // Grid cells of size `tol`: any match lies in the same or a neighbouring cell.
+  const cell = Math.max(tol, 1e-6);
+  const cellKey = (x: number, y: number) => `${Math.floor(x / cell)},${Math.floor(y / cell)}`;
+
+  const grid = new Map<string, number[]>();
+  b.features.forEach((f, i) => {
+    for (const [x, y] of anchors(f)) {
+      const k = cellKey(x, y);
+      const list = grid.get(k);
+      if (list) list.push(i); else grid.set(k, [i]);
+    }
+  });
+  const matchedB = new Uint8Array(b.features.length);
 
   const perLayer: Record<string, LayerGeometryDiff> = {};
   const layer = (id: string) => (perLayer[id] ??= { added: [], removed: [], unchanged: 0 });
 
   let addedCount = 0, removedCount = 0, unchangedCount = 0;
-  for (const [key, f] of bByKey) {
-    if (aByKey.has(key)) { layer(featureLayerKey(f)).unchanged++; unchangedCount++; }
-    else { layer(featureLayerKey(f)).added.push(f); addedCount++; }
+  for (const fa of a.features) {
+    const [x, y] = anchors(fa)[0];
+    const cx = Math.floor(x / cell);
+    const cy = Math.floor(y / cell);
+    let hit = -1;
+    search: for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (const i of grid.get(`${cx + dx},${cy + dy}`) ?? []) {
+          if (!matchedB[i] && sameFeature(fa, b.features[i], tol)) { hit = i; break search; }
+        }
+      }
+    }
+    if (hit >= 0) {
+      matchedB[hit] = 1;
+      layer(featureLayerKey(fa)).unchanged++;
+      unchangedCount++;
+    } else {
+      layer(featureLayerKey(fa)).removed.push(fa);
+      removedCount++;
+    }
   }
-  for (const [key, f] of aByKey) {
-    if (!bByKey.has(key)) { layer(featureLayerKey(f)).removed.push(f); removedCount++; }
-  }
+  b.features.forEach((fb, i) => {
+    if (!matchedB[i]) { layer(featureLayerKey(fb)).added.push(fb); addedCount++; }
+  });
 
   return { perLayer, summary: { addedCount, removedCount, unchangedCount } };
 }

@@ -45,4 +45,24 @@ describe("diffGeometry", () => {
     const b = geom([pad(5.01, 4.99)]);
     expect(diffGeometry(a, b, 0.05).summary.unchangedCount).toBe(1);
   });
+
+  it("matches noise that straddles a grid boundary", () => {
+    // 5.024 and 5.026 round to different 0.05 mm steps; they are 0.002 mm apart.
+    const d = diffGeometry(geom([pad(5.024, 5)]), geom([pad(5.026, 5)]), 0.05);
+    expect(d.summary.unchangedCount).toBe(1);
+    expect(d.summary.addedCount).toBe(0);
+    expect(d.summary.removedCount).toBe(0);
+  });
+
+  it("counts duplicate features instead of merging them", () => {
+    const d = diffGeometry(geom([pad(5, 5), pad(5, 5)]), geom([pad(5, 5)]));
+    expect(d.summary.unchangedCount).toBe(1);
+    expect(d.summary.removedCount).toBe(1);
+  });
+
+  it("still reports a real move beyond tolerance", () => {
+    const d = diffGeometry(geom([pad(5, 5)]), geom([pad(5.2, 5)]), 0.05);
+    expect(d.summary.addedCount).toBe(1);
+    expect(d.summary.removedCount).toBe(1);
+  });
 });
