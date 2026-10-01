@@ -1,5 +1,5 @@
 var ce = typeof globalThis < "u" ? globalThis : typeof window < "u" ? window : typeof global < "u" ? global : typeof self < "u" ? self : {};
-function We(d) {
+function Ye(d) {
   return d && d.__esModule && Object.prototype.hasOwnProperty.call(d, "default") ? d.default : d;
 }
 function de(d) {
@@ -7,7 +7,7 @@ function de(d) {
 }
 var me = { exports: {} };
 var we;
-function Ye() {
+function Ze() {
   return we || (we = 1, (function(d, t) {
     (function(e) {
       d.exports = e();
@@ -2309,14 +2309,14 @@ function Ye() {
     });
   })(me)), me.exports;
 }
-var Ze = Ye();
-const Oe = /* @__PURE__ */ We(Ze);
-async function Ge(d) {
-  const t = await qe(d), e = await Oe.loadAsync(t), n = [];
+var Ge = Ze();
+const Fe = /* @__PURE__ */ Ye(Ge);
+async function qe(d) {
+  const t = await Ve(d), e = await Fe.loadAsync(t), n = [];
   return e.forEach((o, i) => {
     if (i.dir)
       return;
-    const r = Ve(o);
+    const r = He(o);
     n.push({
       name: r,
       text: () => i.async("text"),
@@ -2324,24 +2324,24 @@ async function Ge(d) {
     });
   }), n;
 }
-async function qe(d) {
+async function Ve(d) {
   if (d instanceof ArrayBuffer)
     return d;
   if (d instanceof Blob)
     return await d.arrayBuffer();
   throw new Error("Unsupported input type for unzipGerbersZip");
 }
-function Ve(d) {
+function He(d) {
   let t = d.replace(/\\/g, "/");
   return t.startsWith("./") && (t = t.slice(2)), t.startsWith("/") && (t = t.slice(1)), t;
 }
-function He(d) {
+function Ke(d) {
   return !!d && typeof d == "object" && !(d instanceof ArrayBuffer) && !(d instanceof Uint8Array);
 }
-function Ke(d) {
+function Je(d) {
   return d instanceof Uint8Array ? d : new Uint8Array(d);
 }
-function Je(d) {
+function Qe(d) {
   return d.byteOffset === 0 && d.byteLength === d.buffer.byteLength ? d.buffer : d.slice().buffer;
 }
 function te(d, t, e = 0) {
@@ -2350,22 +2350,22 @@ function te(d, t, e = 0) {
     if (d[e + n] !== t[n]) return !1;
   return !0;
 }
-function Qe(d) {
+function tr(d) {
   return te(d, [80, 75, 3, 4]) || te(d, [80, 75, 5, 6]) || te(d, [80, 75, 7, 8]) ? "zip" : te(d, [82, 97, 114, 33, 26, 7, 0]) || te(d, [82, 97, 114, 33, 26, 7, 1, 0]) ? "rar" : te(d, [55, 122, 188, 175, 39, 28]) ? "7z" : d.length > 262 && te(d, [117, 115, 116, 97, 114], 257) ? "tar" : "unknown";
 }
-function Fe(d) {
+function Le(d) {
   return d.replace(/\\/g, "/").replace(/^\.?\//, "");
 }
 function ke(d) {
-  const t = [], e = d.map((a) => Fe(a).toLowerCase()), n = (a) => e.some(a), o = /\.(gbr|gbl|gtl|gbs|gts|gbo|gto|gko|gm1|gml|pho|art)$/i, i = /\.(drl|xln)$/i, r = e.filter((a) => o.test(a)).length, s = e.filter((a) => i.test(a) || a.includes("drill")).length, c = n((a) => a.includes("top") && a.includes("copper") || a.endsWith(".gtl")), m = n((a) => a.includes("bot") || a.includes("bottom") || a.endsWith(".gbl")), y = n((a) => a.includes("mask") || a.includes("solder") || a.endsWith(".gts") || a.endsWith(".gbs")), _ = n((a) => a.includes("silk") || a.includes("legend") || a.endsWith(".gto") || a.endsWith(".gbo")), g = n((a) => a.includes("outline") || a.includes("profile") || a.includes("edge") || a.endsWith(".gko") || a.endsWith(".gm1") || a.endsWith(".gml")), f = e.every(
+  const t = [], e = d.map((a) => Le(a).toLowerCase()), n = (a) => e.some(a), o = /\.(gbr|gbl|gtl|gbs|gts|gbo|gto|gko|gm1|gml|pho|art)$/i, i = /\.(drl|xln)$/i, r = e.filter((a) => o.test(a)).length, s = e.filter((a) => i.test(a) || a.includes("drill")).length, c = n((a) => a.includes("top") && a.includes("copper") || a.endsWith(".gtl")), m = n((a) => a.includes("bot") || a.includes("bottom") || a.endsWith(".gbl")), y = n((a) => a.includes("mask") || a.includes("solder") || a.endsWith(".gts") || a.endsWith(".gbs")), _ = n((a) => a.includes("silk") || a.includes("legend") || a.endsWith(".gto") || a.endsWith(".gbo")), g = n((a) => a.includes("outline") || a.includes("profile") || a.includes("edge") || a.endsWith(".gko") || a.endsWith(".gm1") || a.endsWith(".gml")), f = e.every(
     (a) => a.endsWith(".pdf") || a.endsWith(".png") || a.endsWith(".jpg") || a.endsWith(".jpeg") || a.endsWith(".svg") || a.endsWith(".txt") || a.endsWith(".md")
   );
   let b = 0;
   return d.length === 0 ? (t.push("No files found."), { confidence: 0, reasons: t }) : f ? (t.push("Bundle only contains documents/images (no Gerber-like files)."), { confidence: 0.05, reasons: t }) : (r > 0 ? (b += 0.35, t.push(`Found ${r} Gerber-like file(s) by extension.`)) : t.push("No common Gerber extensions detected."), s > 0 && (b += 0.2, t.push(`Found ${s} drill-like file(s).`)), g && (b += 0.15, t.push("Found outline/profile/edge candidate.")), c && m ? (b += 0.2, t.push("Found both top and bottom copper candidates.")) : (c || m) && (b += 0.1, t.push("Found at least one copper candidate.")), y && (b += 0.05, t.push("Found solder mask candidate.")), _ && (b += 0.05, t.push("Found silkscreen/legend candidate.")), b = Math.max(0, Math.min(1, b)), b < 0.6 && r >= 2 && (b = Math.max(b, 0.55), t.push("Multiple Gerber-like files found, but layer completeness is unclear.")), { confidence: b, reasons: t });
 }
-async function tr(d) {
-  if (He(d)) {
-    const i = Object.keys(d).map(Fe), { confidence: r, reasons: s } = ke(i);
+async function er(d) {
+  if (Ke(d)) {
+    const i = Object.keys(d).map(Le), { confidence: r, reasons: s } = ke(i);
     return {
       isGerber: r >= 0.6,
       archiveType: "directory",
@@ -2374,10 +2374,10 @@ async function tr(d) {
       files: i
     };
   }
-  const t = Ke(d), e = Qe(t);
+  const t = Je(d), e = tr(t);
   if (e === "zip")
     try {
-      const i = Je(t), s = (await Ge(i)).map((y) => y.name), { confidence: c, reasons: m } = ke(s);
+      const i = Qe(t), s = (await qe(i)).map((y) => y.name), { confidence: c, reasons: m } = ke(s);
       return {
         isGerber: c >= 0.6,
         archiveType: "zip",
@@ -2421,14 +2421,14 @@ class Mt extends Error {
     super(e), this.name = "GerberError", this.code = t, this.details = n;
   }
 }
-function Le(d) {
+function Ne(d) {
   let t = d.replace(/\\/g, "/");
   return t.startsWith("./") && (t = t.slice(2)), t.startsWith("/") && (t = t.slice(1)), t;
 }
-function er(d) {
+function rr(d) {
   return d instanceof Uint8Array ? d : new Uint8Array(d);
 }
-function Ne(d) {
+function $e(d) {
   try {
     return d.slice().buffer;
   } catch {
@@ -2436,10 +2436,10 @@ function Ne(d) {
     return t.set(d), t.buffer;
   }
 }
-async function rr(d) {
+async function nr(d) {
   let t;
   try {
-    t = await Oe.loadAsync(Ne(d));
+    t = await Fe.loadAsync($e(d));
   } catch (s) {
     throw new Mt(
       "NOT_AN_ARCHIVE",
@@ -2456,7 +2456,7 @@ async function rr(d) {
   let r = 0;
   for (const [s, c] of i)
     try {
-      const m = Le(s), y = await c.async("arraybuffer");
+      const m = Ne(s), y = await c.async("arraybuffer");
       if (r += y.byteLength, r > o)
         throw new Mt(
           "PARSE_ERROR",
@@ -2471,7 +2471,7 @@ async function rr(d) {
     throw new Mt("PARSE_ERROR", "No files extracted from ZIP archive");
   return e;
 }
-async function nr(d, t) {
+async function ir(d, t) {
   let e;
   try {
     const _ = await import("./libarchive-Bt1VdZR0.js");
@@ -2497,7 +2497,7 @@ async function nr(d, t) {
     }
   let n;
   try {
-    const _ = new Blob([Ne(d)], { type: "application/octet-stream" });
+    const _ = new Blob([$e(d)], { type: "application/octet-stream" });
     n = await e.open(_);
   } catch (_) {
     throw new Mt("NOT_AN_ARCHIVE", "Failed to open RAR archive", _);
@@ -2534,7 +2534,7 @@ async function nr(d, t) {
               "PARSE_ERROR",
               `Total extracted size exceeds limit (${c} bytes)`
             );
-          i[Le(a)] = new Uint8Array(p);
+          i[Ne(a)] = new Uint8Array(p);
         } catch (p) {
           if (p instanceof Mt) throw p;
           console.warn(`Failed to extract file ${a}:`, p);
@@ -2559,7 +2559,7 @@ async function nr(d, t) {
 async function he(d, t) {
   if (!d || d.byteLength === 0)
     throw new Mt("NOT_AN_ARCHIVE", "Input is empty");
-  const e = er(d), n = 100 * 1024 * 1024;
+  const e = rr(d), n = 100 * 1024 * 1024;
   if (e.length > n)
     throw new Mt(
       "PARSE_ERROR",
@@ -2567,7 +2567,7 @@ async function he(d, t) {
     );
   let o;
   try {
-    o = await tr(e);
+    o = await er(e);
   } catch (i) {
     throw new Mt("PARSE_ERROR", "Failed to detect archive type", i);
   }
@@ -2579,9 +2579,9 @@ async function he(d, t) {
     );
   try {
     if (o.archiveType === "zip")
-      return { archiveType: "zip", files: await rr(e) };
+      return { archiveType: "zip", files: await nr(e) };
     if (o.archiveType === "rar")
-      return { archiveType: "rar", files: await nr(e, t) };
+      return { archiveType: "rar", files: await ir(e, t) };
     if (o.archiveType === "single-file")
       return { archiveType: "single-file", files: { "layer.gtl": e } };
     throw new Mt(
@@ -2614,7 +2614,7 @@ function vt(d, t) {
     return e.every((r) => i.includes(r));
   }).sort((o, i) => o.length - i.length)[0];
 }
-function ir(d, t, e) {
+function sr(d, t, e) {
   const n = new Set([t, e].filter(Boolean)), o = [];
   for (const i of d) {
     if (n.has(i)) continue;
@@ -2636,7 +2636,7 @@ function ir(d, t, e) {
   }
   return o.sort((i, r) => i.num - r.num), o;
 }
-function sr(d, t, e) {
+function or(d, t, e) {
   const n = new Set([t, e].filter(Boolean)), o = [];
   for (const i of d) {
     if (n.has(i)) continue;
@@ -2655,7 +2655,7 @@ function sr(d, t, e) {
   }
   return o.sort(), o;
 }
-function or(d) {
+function ar(d) {
   const t = [], e = (n) => ne(n);
   for (const n of d) {
     const o = e(n), i = o.split("/").pop() || o, r = i.slice(i.lastIndexOf("."));
@@ -2674,11 +2674,11 @@ function or(d) {
   }
   return t;
 }
-function ar(d) {
+function lr(d) {
   const t = d.filter((_) => {
     const g = ne(_);
     return !(g.endsWith("/") || g.includes("__macosx") || g.endsWith(".ds_store"));
-  }), e = Vt(t, [".gtl"]) || vt(t, ["f_cu"]) || vt(t, ["top", "cu"]) || vt(t, ["top", "copper"]), n = Vt(t, [".gbl"]) || vt(t, ["b_cu"]) || vt(t, ["bottom", "cu"]) || vt(t, ["bottom", "copper"]), o = Vt(t, [".gts"]) || vt(t, ["f_mask"]) || vt(t, ["top", "mask"]), i = Vt(t, [".gbs"]) || vt(t, ["b_mask"]) || vt(t, ["bottom", "mask"]), r = Vt(t, [".gto"]) || vt(t, ["f_silks"]) || vt(t, ["f_silk"]) || vt(t, ["top", "silk"]), s = Vt(t, [".gbo"]) || vt(t, ["b_silks"]) || vt(t, ["b_silk"]) || vt(t, ["bottom", "silk"]), c = Vt(t, [".gko", ".gm1"]) || vt(t, ["edge", "cuts"]) || vt(t, ["outline"]) || vt(t, ["board", "outline"]), m = or(t), y = sr(t, e, n);
+  }), e = Vt(t, [".gtl"]) || vt(t, ["f_cu"]) || vt(t, ["top", "cu"]) || vt(t, ["top", "copper"]), n = Vt(t, [".gbl"]) || vt(t, ["b_cu"]) || vt(t, ["bottom", "cu"]) || vt(t, ["bottom", "copper"]), o = Vt(t, [".gts"]) || vt(t, ["f_mask"]) || vt(t, ["top", "mask"]), i = Vt(t, [".gbs"]) || vt(t, ["b_mask"]) || vt(t, ["bottom", "mask"]), r = Vt(t, [".gto"]) || vt(t, ["f_silks"]) || vt(t, ["f_silk"]) || vt(t, ["top", "silk"]), s = Vt(t, [".gbo"]) || vt(t, ["b_silks"]) || vt(t, ["b_silk"]) || vt(t, ["bottom", "silk"]), c = Vt(t, [".gko", ".gm1"]) || vt(t, ["edge", "cuts"]) || vt(t, ["outline"]) || vt(t, ["board", "outline"]), m = ar(t), y = or(t, e, n);
   return {
     top_copper: e,
     bottom_copper: n,
@@ -2691,11 +2691,11 @@ function ar(d) {
     inner_copper: y.length ? y : void 0
   };
 }
-function lr(d) {
+function cr(d) {
   const t = d.filter((s) => {
     const c = ne(s);
     return !(c.endsWith("/") || c.includes("__macosx") || c.endsWith(".ds_store"));
-  }), e = ar(t), n = Vt(t, [".gtp"]) || vt(t, ["f_paste"]) || vt(t, ["top", "paste"]), o = Vt(t, [".gbp"]) || vt(t, ["b_paste"]) || vt(t, ["bottom", "paste"]), i = ir(t, e.top_copper, e.bottom_copper), r = [];
+  }), e = lr(t), n = Vt(t, [".gtp"]) || vt(t, ["f_paste"]) || vt(t, ["top", "paste"]), o = Vt(t, [".gbp"]) || vt(t, ["b_paste"]) || vt(t, ["bottom", "paste"]), i = sr(t, e.top_copper, e.bottom_copper), r = [];
   e.top_copper && r.push({ path: e.top_copper, role: "top", index: 0 });
   for (const s of i) r.push({ path: s.path, role: "inner", index: 0, detectedNum: s.num });
   return e.bottom_copper && r.push({ path: e.bottom_copper, role: "bottom", index: 0 }), r.forEach((s, c) => {
@@ -2713,7 +2713,7 @@ function lr(d) {
   };
 }
 const Me = 32;
-function cr(d) {
+function dr(d) {
   const t = d.split("*").map((o) => o.trim()).filter(Boolean);
   if (!t.length || !t[0].startsWith("AM")) return null;
   const e = t[0].slice(2).trim();
@@ -2730,7 +2730,7 @@ function cr(d) {
   }
   return { name: e, statements: n };
 }
-function dr(d, t, e) {
+function ur(d, t, e) {
   const n = /* @__PURE__ */ new Map();
   t.forEach((i, r) => n.set(r + 1, i));
   const o = [];
@@ -2744,14 +2744,14 @@ function dr(d, t, e) {
       case 1: {
         if (!r[0]) break;
         const c = r[1] * s / 2, m = { x: r[2] * s, y: r[3] * s };
-        o.push(re(ur(m, c), r[4] ?? 0));
+        o.push(re(hr(m, c), r[4] ?? 0));
         break;
       }
       case 2:
       case 20: {
         if (!r[0]) break;
         const c = r[1] * s, m = { x: r[2] * s, y: r[3] * s }, y = { x: r[4] * s, y: r[5] * s };
-        o.push(re(hr(m, y, c), r[6] ?? 0));
+        o.push(re(fr(m, y, c), r[6] ?? 0));
         break;
       }
       case 21: {
@@ -2789,7 +2789,7 @@ function dr(d, t, e) {
       }
       case 7: {
         const c = { x: r[0] * s, y: r[1] * s }, m = r[2] * s / 2, y = r[3] * s / 2, _ = r[4] * s / 2;
-        for (const g of fr(c, m, y, _)) o.push(re(g, r[5] ?? 0));
+        for (const g of mr(c, m, y, _)) o.push(re(g, r[5] ?? 0));
         break;
       }
     }
@@ -2801,7 +2801,7 @@ function re(d, t) {
   const e = t * Math.PI / 180, n = Math.cos(e), o = Math.sin(e);
   return d.map((i) => ({ x: i.x * n - i.y * o, y: i.x * o + i.y * n }));
 }
-function ur(d, t) {
+function hr(d, t) {
   const e = [];
   for (let n = 0; n < Me; n++) {
     const o = 2 * Math.PI * n / Me;
@@ -2809,7 +2809,7 @@ function ur(d, t) {
   }
   return e;
 }
-function hr(d, t, e) {
+function fr(d, t, e) {
   const n = t.x - d.x, o = t.y - d.y, i = Math.hypot(n, o), r = i > 0 ? -o / i * (e / 2) : e / 2, s = i > 0 ? n / i * (e / 2) : 0;
   return [
     { x: d.x + r, y: d.y + s },
@@ -2818,7 +2818,7 @@ function hr(d, t, e) {
     { x: d.x - r, y: d.y - s }
   ];
 }
-function fr(d, t, e, n) {
+function mr(d, t, e, n) {
   if (t <= 0 || n >= t) return [];
   const o = [], i = 8;
   for (let r = 0; r < 4; r++) {
@@ -2879,7 +2879,7 @@ function Se(d, t) {
   }, s = o();
   return Number.isFinite(s) ? s : 0;
 }
-const mr = 0.8;
+const pr = 0.8;
 function Zt(d, t, e) {
   const n = {
     unitScale: 1,
@@ -2915,7 +2915,7 @@ function Zt(d, t, e) {
           s.length > 1 && s.endsWith("%") ? Ie(s, n) : i = s;
           continue;
         }
-        s.endsWith("*") && (s = s.slice(0, -1)), pr(s, n);
+        s.endsWith("*") && (s = s.slice(0, -1)), yr(s, n);
       }
     }
   }
@@ -2957,13 +2957,13 @@ function Ie(d, t) {
     if (e.includes("MOMM") ? o = 1 : e.includes("MOIN") && (o = 25.4), o !== n) {
       const i = o / n;
       for (const r of t.apertures.values())
-        r.diameterMm !== void 0 && (r.diameterMm *= i), r.widthMm !== void 0 && (r.widthMm *= i), r.heightMm !== void 0 && (r.heightMm *= i), r.macroLoops && (r.macroLoops = r.macroLoops.map((s) => s.map((c) => ({ x: c.x * i, y: c.y * i }))));
+        r.diameterMm !== void 0 && (r.diameterMm *= i), r.widthMm !== void 0 && (r.widthMm *= i), r.heightMm !== void 0 && (r.heightMm *= i), r.outlineLoops && (r.outlineLoops = r.outlineLoops.map((s) => s.map((c) => ({ x: c.x * i, y: c.y * i }))));
       t.unitScale = o;
     }
     return;
   }
   if (e.startsWith("AM")) {
-    const n = cr(e);
+    const n = dr(e);
     n && t.macros.set(n.name, n.statements);
     return;
   }
@@ -2972,17 +2972,24 @@ function Ie(d, t) {
     if (!n) return;
     const o = parseInt(n[2], 10), i = n[3], r = n[4] ?? "", s = t.macros.get(i);
     if (s) {
-      const a = r.split(/[Xx]/).filter(Boolean).map((x) => parseFloat(x)), p = dr(s, a, t.unitScale), h = { code: o, shape: i, macroName: i, macroLoops: p };
-      if (p.length) {
-        let x = 1 / 0, w = 1 / 0, I = -1 / 0, R = -1 / 0;
-        for (const P of p) for (const B of P)
-          x = Math.min(x, B.x), I = Math.max(I, B.x), w = Math.min(w, B.y), R = Math.max(R, B.y);
-        h.widthMm = 2 * Math.max(Math.abs(x), Math.abs(I)), h.heightMm = 2 * Math.max(Math.abs(w), Math.abs(R)), h.diameterMm = Math.min(h.widthMm, h.heightMm);
-      }
-      t.apertures.set(o, h);
+      const a = r.split(/[Xx]/).filter(Boolean).map((h) => parseFloat(h)), p = { code: o, shape: i, macroName: i };
+      Ee(p, ur(s, a, t.unitScale)), t.apertures.set(o, p);
       return;
     }
-    const c = i === "C" || i === "R" || i === "O" || i === "P" ? r : /^[0-9.Xx]*/.exec(r)?.[0] ?? "";
+    if (i === "P") {
+      const [a, p, h] = r.split(/[Xx]/).filter(Boolean).map((I) => parseFloat(I)), x = { code: o, shape: i }, w = Math.round(p);
+      if (a > 0 && w >= 3) {
+        const I = a * t.unitScale / 2, R = (Number.isFinite(h) ? h : 0) * Math.PI / 180, P = [];
+        for (let B = 0; B < w; B++) {
+          const U = R + 2 * Math.PI * B / w;
+          P.push({ x: I * Math.cos(U), y: I * Math.sin(U) });
+        }
+        Ee(x, [P]);
+      }
+      t.apertures.set(o, x);
+      return;
+    }
+    const c = i === "C" || i === "R" || i === "O" ? r : /^[0-9.Xx]*/.exec(r)?.[0] ?? "";
     let m, y, _, g, f;
     if (c) {
       const a = c.split(/[Xx]/).filter(Boolean), p = a[0] ? parseFloat(a[0]) * t.unitScale : void 0, h = a[1] ? parseFloat(a[1]) * t.unitScale : void 0, x = a[2] ? parseFloat(a[2]) * t.unitScale : void 0, w = a[3] ? parseFloat(a[3]) : void 0;
@@ -3027,7 +3034,7 @@ function Re(d, t, e, n, o) {
   }
   return b;
 }
-function pr(d, t) {
+function yr(d, t) {
   if (d === "G36") {
     t.inRegion = !0, t.regionPaths = [], t.currentPath = [];
     return;
@@ -3112,7 +3119,7 @@ function pr(d, t) {
   }
   if (n === 3) {
     if (t.currentAperture) {
-      const a = t.currentAperture, p = a.diameterMm !== void 0 ? a.diameterMm : mr, h = (a.rotationDeg ?? 0) + t.loadRotationDeg, x = h !== 0 ? h : void 0, w = {
+      const a = t.currentAperture, p = a.diameterMm !== void 0 ? a.diameterMm : pr, h = (a.rotationDeg ?? 0) + t.loadRotationDeg, x = h !== 0 ? h : void 0, w = {
         position: { x: m, y },
         diameterMm: p,
         shape: a.shape,
@@ -3120,7 +3127,7 @@ function pr(d, t) {
         rotationDeg: x
       };
       a.widthMm !== void 0 && (w.widthMm = a.widthMm), a.heightMm !== void 0 && (w.heightMm = a.heightMm), a.cornerMm !== void 0 && (w.cornerMm = a.cornerMm);
-      const I = a.macroLoops?.map(
+      const I = a.outlineLoops?.map(
         (R) => re(R, t.loadRotationDeg).map((P) => ({ x: P.x + m, y: P.y + y }))
       );
       I && (w.loops = I), t.flashes.push(w), t.ops.push({
@@ -3140,6 +3147,13 @@ function pr(d, t) {
     return;
   }
 }
+function Ee(d, t) {
+  if (d.outlineLoops = t, !t.length) return;
+  let e = 1 / 0, n = 1 / 0, o = -1 / 0, i = -1 / 0;
+  for (const r of t) for (const s of r)
+    e = Math.min(e, s.x), o = Math.max(o, s.x), n = Math.min(n, s.y), i = Math.max(i, s.y);
+  d.widthMm = 2 * Math.max(Math.abs(e), Math.abs(o)), d.heightMm = 2 * Math.max(Math.abs(n), Math.abs(i)), d.diameterMm = Math.min(d.widthMm, d.heightMm);
+}
 function ue(d, t) {
   const e = d.startsWith("-") ? -1 : 1, n = d.replace(/[+\-]/g, ""), o = parseInt(n, 10);
   if (Number.isNaN(o)) return 0;
@@ -3149,7 +3163,7 @@ function ue(d, t) {
 function pe(d, t) {
   return /^0+$/.test(d) && /^0+$/.test(t) ? { fmtInt: d.length, fmtDec: t.length } : { fmtInt: parseInt(d, 10), fmtDec: parseInt(t, 10) };
 }
-function yr(d, t) {
+function gr(d, t) {
   const e = t.split(/\r?\n/), n = /* @__PURE__ */ new Map();
   let o = null;
   const i = [], r = [];
@@ -3233,11 +3247,11 @@ function yr(d, t) {
   }
   return { name: d, holes: i, slots: r };
 }
-function gr(d) {
+function _r(d) {
   return { w: d.maxX - d.minX, h: d.maxY - d.minY };
 }
 function se(d) {
-  const { w: t, h: e } = gr(d);
+  const { w: t, h: e } = _r(d);
   return Number.isFinite(t) && Number.isFinite(e) && t > 1 && e > 1 && t < 2e3 && e < 2e3;
 }
 function Xt(d, t) {
@@ -3287,10 +3301,10 @@ function Gt(d, t) {
     })
   };
 }
-function _r(d, t) {
+function br(d, t) {
   return t === 1 ? d : d.map((e) => ({ x: e.x * t, y: e.y * t, diameter: (e.diameter ?? 0) * t }));
 }
-function br(d, t) {
+function xr(d, t) {
   return t === 1 ? d : d.map((e) => ({
     x1: e.x1 * t,
     y1: e.y1 * t,
@@ -3299,13 +3313,13 @@ function br(d, t) {
     diameter: (e.diameter ?? 0) * t
   }));
 }
-function $e(d, t) {
+function De(d, t) {
   return d.map((e, n) => {
     const o = t(e.x, e.y);
     return `${n === 0 ? "M" : "L"} ${o.x.toFixed(2)} ${o.y.toFixed(2)}`;
   }).join(" ") + " Z";
 }
-function xr(d) {
+function vr(d) {
   return URL.createObjectURL(new Blob([d], { type: "image/svg+xml" }));
 }
 function Tt(d, t, e) {
@@ -3333,7 +3347,7 @@ function $t(d) {
     for (const n of e.loops) for (const o of n) Tt(t, o.x, o.y);
   return t;
 }
-function vr(d, t = []) {
+function wr(d, t = []) {
   const e = _e();
   for (const n of d) {
     const o = (n.diameter || 0) / 2;
@@ -3345,7 +3359,7 @@ function vr(d, t = []) {
   }
   return e;
 }
-function Ee(d, t) {
+function Ae(d, t) {
   return {
     minX: Math.min(d.minX, t.minX),
     minY: Math.min(d.minY, t.minY),
@@ -3356,15 +3370,15 @@ function Ee(d, t) {
 function Ft(d) {
   return !Number.isFinite(d.minX) || !Number.isFinite(d.minY) || !Number.isFinite(d.maxX) || !Number.isFinite(d.maxY) ? { minX: 0, minY: 0, maxX: 80, maxY: 60 } : (d.maxX - d.minX < 1e-6 && (d.maxX = d.minX + 1), d.maxY - d.minY < 1e-6 && (d.maxY = d.minY + 1), d);
 }
-const wr = 1e3;
+const kr = 1e3;
 function Lt(d) {
-  return d / 25.4 * wr;
+  return d / 25.4 * kr;
 }
 function Ht(d, t, e) {
   const n = d - e.minX, o = e.maxY - t;
   return { x: n, y: o };
 }
-function De(d, t) {
+function Ue(d, t) {
   return `
 <svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${t}" viewBox="0 0 ${d} ${t}">
   <rect width="${d}" height="${t}" fill="white"/>
@@ -3374,7 +3388,7 @@ function qt(d, t = 1e-4) {
   const e = Math.round(d.x / t) * t, n = Math.round(d.y / t) * t;
   return `${e.toFixed(4)},${n.toFixed(4)}`;
 }
-function Ae(d) {
+function Ce(d) {
   let t = 0;
   const e = d.length;
   for (let n = 0; n < e; n++) {
@@ -3395,7 +3409,7 @@ function ye(d, t, e) {
   }
   return i.push("Z"), i.join(" ");
 }
-function Ue(d) {
+function je(d) {
   const t = /* @__PURE__ */ new Map(), e = /* @__PURE__ */ new Map(), n = (m, y) => {
     const _ = qt(m), g = qt(y);
     t.has(_) || t.set(_, []), t.has(g) || t.set(g, []), t.get(_).push(y), t.get(g).push(m), e.has(_) || e.set(_, m), e.has(g) || e.set(g, y);
@@ -3432,7 +3446,7 @@ function Ue(d) {
       b.length >= 3 && r.push(b);
     }
   }
-  r.sort((m, y) => Math.abs(Ae(y)) - Math.abs(Ae(m)));
+  r.sort((m, y) => Math.abs(Ce(y)) - Math.abs(Ce(m)));
   const s = [], c = /* @__PURE__ */ new Set();
   for (const m of r) {
     const y = m.map((_) => qt(_)).join(";");
@@ -3440,13 +3454,13 @@ function Ue(d) {
   }
   return s;
 }
-function kr(d, t) {
+function Mr(d, t) {
   const e = t.maxX - t.minX, n = t.maxY - t.minY, o = Math.max(1, Math.round(Lt(e))), i = Math.max(1, Math.round(Lt(n))), r = Lt(1), s = [];
   for (const c of d.regions)
     for (const m of c.loops)
       s.push(ye(m, t, r));
   if (s.length === 0 && d.tracks.length) {
-    const c = Ue(d.tracks);
+    const c = je(d.tracks);
     if (c.length) {
       const m = c[0];
       s.push(ye(m, t, r));
@@ -3454,31 +3468,31 @@ function kr(d, t) {
         s.push(ye(c[y], t, r));
     }
   }
-  return s.length === 0 ? De(o, i) : `
+  return s.length === 0 ? Ue(o, i) : `
 <svg xmlns="http://www.w3.org/2000/svg" width="${o}" height="${i}" viewBox="0 0 ${o} ${i}">
   <rect x="0" y="0" width="${o}" height="${i}" fill="black"/>
   <path d="${s.join(" ")}" fill="white" fill-rule="evenodd"/>
 </svg>`.trim();
 }
-function Mr(d) {
+function Sr(d) {
   let t = 1 / 0, e = 1 / 0, n = -1 / 0, o = -1 / 0;
   for (const i of d.loops)
     for (const r of i)
       t = Math.min(t, r.x), e = Math.min(e, r.y), n = Math.max(n, r.x), o = Math.max(o, r.y);
   return { minX: t, minY: e, maxX: n, maxY: o };
 }
-function Sr(d, t) {
+function Ir(d, t) {
   const e = (t.maxX - t.minX) * (t.maxY - t.minY);
   let n = 0, o = 0;
   for (const m of d.regions) {
-    const y = Mr(m), _ = (y.maxX - y.minX) * (y.maxY - y.minY);
+    const y = Sr(m), _ = (y.maxX - y.minX) * (y.maxY - y.minY);
     m.polarity === "clear" ? o = Math.max(o, _) : n = Math.max(n, _);
   }
   const i = d.tracks.filter((m) => m.polarity !== "clear").length + d.flashes.filter((m) => m.polarity !== "clear").length + d.regions.filter((m) => m.polarity !== "clear").length, r = d.tracks.filter((m) => m.polarity === "clear").length + d.flashes.filter((m) => m.polarity === "clear").length + d.regions.filter((m) => m.polarity === "clear").length, s = o > e * 0.85;
   return !(n > e * 0.85 || !s || !(r > i * 2));
 }
 function ee(d, t, e, n) {
-  const o = t.maxX - t.minX, i = t.maxY - t.minY, r = Math.max(1, Math.round(Lt(o))), s = Math.max(1, Math.round(Lt(i))), c = Lt(1), y = Sr(d, t) ? "white" : "black", _ = (a, p) => {
+  const o = t.maxX - t.minX, i = t.maxY - t.minY, r = Math.max(1, Math.round(Lt(o))), s = Math.max(1, Math.round(Lt(i))), c = Lt(1), y = Ir(d, t) ? "white" : "black", _ = (a, p) => {
     const h = a - t.minX, x = t.maxY - p;
     return { x: h * c, y: x * c };
   }, g = (a, p) => {
@@ -3488,7 +3502,7 @@ function ee(d, t, e, n) {
     }
     if (a.kind === "flash") {
       if (a.loops)
-        return a.loops.map((q) => `<path d="${$e(q, _)}" fill="${p}" fill-opacity="1" />`).join("");
+        return a.loops.map((q) => `<path d="${De(q, _)}" fill="${p}" fill-opacity="1" />`).join("");
       const h = _(a.position.x, a.position.y), x = a.widthMm ?? a.diameterMm ?? 0.8, w = a.heightMm ?? a.diameterMm ?? 0.8, I = Math.max(0.01, Number.isFinite(x) ? x : 0.8) * c, R = Math.max(0.01, Number.isFinite(w) ? w : 0.8) * c, P = h.x - I / 2, B = h.y - R / 2, U = a.rotationDeg, E = U && Math.abs(U) > 0.01 ? ` transform="rotate(${(-U).toFixed(2)},${h.x.toFixed(2)},${h.y.toFixed(2)})"` : "";
       if (a.shape === "R" || a.shape === "O") {
         const q = a.shape === "O" ? Math.min(I, R) * 0.5 : 0;
@@ -3533,7 +3547,7 @@ function ee(d, t, e, n) {
   <rect x="0" y="0" width="${r}" height="${s}" fill="${e}" opacity="${n}" mask="url(#${b})" />
 </svg>`.trim();
 }
-function Ce(d, t) {
+function ze(d, t) {
   const e = t.maxX - t.minX, n = t.maxY - t.minY, o = Math.max(1, Math.round(Lt(e))), i = Math.max(1, Math.round(Lt(n))), r = Math.max(1e-6, Lt(1)), s = "rgba(255,255,255,0.95)", c = "rgba(255,255,255,0.95)", m = d.tracks.map((g) => {
     const f = Ht(g.start.x, g.start.y, t), b = Ht(g.end.x, g.end.y, t), a = Number.isFinite(g.width) ? g.width : 0.15, p = Math.max(1, a * r);
     return `<line x1="${(f.x * r).toFixed(2)}" y1="${(f.y * r).toFixed(2)}" x2="${(b.x * r).toFixed(2)}" y2="${(b.y * r).toFixed(2)}" stroke="${s}" stroke-width="${p.toFixed(2)}" stroke-linecap="round" stroke-linejoin="round" />`;
@@ -3543,7 +3557,7 @@ function Ce(d, t) {
         const P = Ht(I, R, t);
         return { x: P.x * r, y: P.y * r };
       };
-      return g.loops.map((I) => `<path d="${$e(I, w)}" fill="${c}" />`).join("");
+      return g.loops.map((I) => `<path d="${De(I, w)}" fill="${c}" />`).join("");
     }
     const f = Ht(g.position.x, g.position.y, t), b = f.x * r, a = f.y * r, p = g.widthMm ?? g.diameterMm ?? 0.6, h = g.heightMm ?? g.diameterMm ?? 0.6;
     if (g.shape === "R" || g.shape === "O") {
@@ -3574,7 +3588,7 @@ function Ce(d, t) {
   `)}
 </svg>`.trim();
 }
-function Ir(d, t, e) {
+function Rr(d, t, e) {
   const n = e.maxX - e.minX, o = e.maxY - e.minY, i = Math.round(Lt(n)), r = Math.round(Lt(o)), s = Lt(1), c = d.map((y) => {
     const _ = Ht(y.x, y.y, e), g = _.x * s, f = _.y * s, b = Math.max(1.5, (y.diameter || 0.6) * s / 2);
     return `<circle cx="${g.toFixed(2)}" cy="${f.toFixed(2)}" r="${(b + 2).toFixed(2)}" fill="#c97c2a" /><circle cx="${g.toFixed(2)}" cy="${f.toFixed(2)}" r="${b.toFixed(2)}" fill="#111111" />`;
@@ -3591,7 +3605,7 @@ function Ir(d, t, e) {
 </svg>`.trim();
 }
 async function oe(d) {
-  const t = Object.keys(d).filter((et) => !!et), e = lr(t), n = e.copper.find((et) => et.role === "top"), o = e.copper.find((et) => et.role === "bottom"), i = e.copper.filter((et) => et.role === "inner"), r = {
+  const t = Object.keys(d).filter((et) => !!et), e = cr(t), n = e.copper.find((et) => et.role === "top"), o = e.copper.find((et) => et.role === "bottom"), i = e.copper.filter((et) => et.role === "inner"), r = {
     top_copper: n?.path,
     bottom_copper: o?.path,
     inner_copper: i.length ? i.map((et) => et.path) : void 0,
@@ -3612,7 +3626,7 @@ async function oe(d) {
     for (let et = 0; et < r.drills.length; et++) {
       const xt = g[et];
       if (xt) {
-        const Pt = yr(r.drills[et], xt);
+        const Pt = gr(r.drills[et], xt);
         for (const Yt of Pt.holes) w.push({ x: Yt.x, y: Yt.y, diameter: Yt.diameter });
         for (const Yt of Pt.slots) I.push(Yt);
       }
@@ -3626,7 +3640,7 @@ async function oe(d) {
       "No recognizable Gerber or drill layers were found in the bundle.",
       { files: t }
     );
-  const X = p ? Ft($t(p)) : null, rt = h ? Ft($t(h)) : null, Y = x ? Ft($t(x)) : null, it = w.length || I.length ? Ft(vr(w, I)) : null, O = E ? Ft($t(E)) : null, T = $ ? Ft($t($)) : null, st = q ? Ft($t(q)) : null, Q = M ? Ft($t(M)) : null, H = L ? Ft($t(L)) : null, ft = u ? Ft($t(u)) : null, wt = (Y && se(Y) ? Y : null) || (X && se(X) ? X : null) || (rt && se(rt) ? rt : null) || (it && se(it) ? it : null), ct = wt ? wt.maxX - wt.minX : 1, ut = X ? Xt(X.maxX - X.minX, ct) : 1, bt = rt ? Xt(rt.maxX - rt.minX, ct) : 1, pt = Y ? Xt(Y.maxX - Y.minX, ct) : 1, Rt = it ? Xt(it.maxX - it.minX, ct) : 1, At = O ? Xt(O.maxX - O.minX, ct) : 1, l = T ? Xt(T.maxX - T.minX, ct) : 1, D = st ? Xt(st.maxX - st.minX, ct) : 1, F = Q ? Xt(Q.maxX - Q.minX, ct) : 1, k = H ? Xt(H.maxX - H.minX, ct) : 1, v = ft ? Xt(ft.maxX - ft.minX, ct) : 1, j = N.map((et) => et ? Ft($t(et)) : null).map((et) => et ? Xt(et.maxX - et.minX, ct) : 1), W = p ? Gt(p, ut) : null, C = h ? Gt(h, bt) : null, Z = x ? Gt(x, pt) : null, tt = w.length ? _r(w, Rt) : [], V = I.length ? br(I, Rt) : [], nt = E ? Gt(E, At) : null, ht = $ ? Gt($, l) : null, dt = q ? Gt(q, D) : null, Et = M ? Gt(M, F) : null, jt = L ? Gt(L, k) : null, Ct = u ? Gt(u, v) : null, zt = N.map(
+  const X = p ? Ft($t(p)) : null, rt = h ? Ft($t(h)) : null, Y = x ? Ft($t(x)) : null, it = w.length || I.length ? Ft(wr(w, I)) : null, O = E ? Ft($t(E)) : null, T = $ ? Ft($t($)) : null, st = q ? Ft($t(q)) : null, Q = M ? Ft($t(M)) : null, H = L ? Ft($t(L)) : null, ft = u ? Ft($t(u)) : null, wt = (Y && se(Y) ? Y : null) || (X && se(X) ? X : null) || (rt && se(rt) ? rt : null) || (it && se(it) ? it : null), ct = wt ? wt.maxX - wt.minX : 1, ut = X ? Xt(X.maxX - X.minX, ct) : 1, bt = rt ? Xt(rt.maxX - rt.minX, ct) : 1, pt = Y ? Xt(Y.maxX - Y.minX, ct) : 1, Rt = it ? Xt(it.maxX - it.minX, ct) : 1, At = O ? Xt(O.maxX - O.minX, ct) : 1, l = T ? Xt(T.maxX - T.minX, ct) : 1, D = st ? Xt(st.maxX - st.minX, ct) : 1, F = Q ? Xt(Q.maxX - Q.minX, ct) : 1, k = H ? Xt(H.maxX - H.minX, ct) : 1, v = ft ? Xt(ft.maxX - ft.minX, ct) : 1, j = N.map((et) => et ? Ft($t(et)) : null).map((et) => et ? Xt(et.maxX - et.minX, ct) : 1), W = p ? Gt(p, ut) : null, C = h ? Gt(h, bt) : null, Z = x ? Gt(x, pt) : null, tt = w.length ? br(w, Rt) : [], V = I.length ? xr(I, Rt) : [], nt = E ? Gt(E, At) : null, ht = $ ? Gt($, l) : null, dt = q ? Gt(q, D) : null, Et = M ? Gt(M, F) : null, jt = L ? Gt(L, k) : null, Ct = u ? Gt(u, v) : null, zt = N.map(
     (et, xt) => et ? Gt(et, j[xt]) : null
   );
   let mt = null;
@@ -3636,7 +3650,7 @@ async function oe(d) {
   }
   if (!mt) {
     let et = _e();
-    W && (et = Ee(et, $t(W))), C && (et = Ee(et, $t(C))), et = Ft(et), mt = et;
+    W && (et = Ae(et, $t(W))), C && (et = Ae(et, $t(C))), et = Ft(et), mt = et;
   }
   const yt = Ft(mt), Kt = yt.maxX - yt.minX, Ot = yt.maxY - yt.minY;
   let Qt;
@@ -3646,7 +3660,7 @@ async function oe(d) {
       for (const Pt of xt.loops)
         Pt.length >= 3 && et.push(Pt);
     if (et.length === 0 && Z.tracks.length)
-      for (const xt of Ue(Z.tracks))
+      for (const xt of je(Z.tracks))
         xt.length >= 3 && et.push(xt);
     et.length > 0 && (Qt = et);
   }
@@ -3663,7 +3677,7 @@ async function oe(d) {
     },
     outline_loops_mm: Qt,
     layer_count: e.copper.length
-  }, z = Math.max(1, Math.round(Lt(Kt))), G = Math.max(1, Math.round(Lt(Ot))), K = {}, J = (et, xt) => (K[et] = xt, et), lt = Z ? kr(Z, yt) : De(z, G), ot = J("board_mask", lt), gt = W ? J("cu.top", ee(W, yt, "#fbbf24", 1)) : void 0, _t = C ? J("cu.bottom", ee(C, yt, "#38bdf8", 1)) : void 0, St = dt ? J("top:mask", ee(dt, yt, "#fbbf24", 0.9)) : void 0, kt = Et ? J("bottom:mask", ee(Et, yt, "#38bdf8", 0.9)) : void 0, Dt = tt.length || V.length ? J("drills", Ir(tt, V, yt)) : void 0, Wt = ["#a78bfa", "#34d399", "#fb923c", "#60a5fa", "#f472b6"], Bt = [];
+  }, z = Math.max(1, Math.round(Lt(Kt))), G = Math.max(1, Math.round(Lt(Ot))), K = {}, J = (et, xt) => (K[et] = xt, et), lt = Z ? Mr(Z, yt) : Ue(z, G), ot = J("board_mask", lt), gt = W ? J("cu.top", ee(W, yt, "#fbbf24", 1)) : void 0, _t = C ? J("cu.bottom", ee(C, yt, "#38bdf8", 1)) : void 0, St = dt ? J("top:mask", ee(dt, yt, "#fbbf24", 0.9)) : void 0, kt = Et ? J("bottom:mask", ee(Et, yt, "#38bdf8", 0.9)) : void 0, Dt = tt.length || V.length ? J("drills", Rr(tt, V, yt)) : void 0, Wt = ["#a78bfa", "#34d399", "#fb923c", "#60a5fa", "#f472b6"], Bt = [];
   for (let et = 0; et < zt.length; et++) {
     const xt = zt[et];
     if (xt) {
@@ -3672,7 +3686,7 @@ async function oe(d) {
     } else
       Bt.push("");
   }
-  const It = nt ? J("top:silk", Ce(nt, yt)) : void 0, Nt = ht ? J("bottom:silk", Ce(ht, yt)) : void 0, Ut = jt ? J("top:paste", ee(jt, yt, "#cbd5e1", 0.85)) : void 0, be = Ct ? J("bottom:paste", ee(Ct, yt, "#cbd5e1", 0.85)) : void 0, xe = [];
+  const It = nt ? J("top:silk", ze(nt, yt)) : void 0, Nt = ht ? J("bottom:silk", ze(ht, yt)) : void 0, Ut = jt ? J("top:paste", ee(jt, yt, "#cbd5e1", 0.85)) : void 0, be = Ct ? J("bottom:paste", ee(Ct, yt, "#cbd5e1", 0.85)) : void 0, xe = [];
   for (const et of e.copper) {
     let xt, Pt, Yt, le;
     if (et.role === "top")
@@ -3701,10 +3715,10 @@ async function oe(d) {
     viasId: void 0
   };
 }
-async function je(d) {
+async function Xe(d) {
   const t = await oe(d), e = [], n = /* @__PURE__ */ new Map();
   for (const [g, f] of Object.entries(t.svgById)) {
-    const b = xr(f);
+    const b = vr(f);
     n.set(g, b), e.push(b);
   }
   const o = (g) => g ? n.get(g) : void 0, i = o(t.boardMaskId), r = {
@@ -3733,7 +3747,7 @@ async function je(d) {
     revoke: () => e.forEach((g) => URL.revokeObjectURL(g))
   };
 }
-async function rn(d) {
+async function nn(d) {
   const t = d instanceof Uint8Array ? d.byteOffset === 0 && d.byteLength === d.buffer.byteLength ? d.buffer : d.slice().buffer : d instanceof ArrayBuffer ? d : await d.arrayBuffer(), { files: e, archiveType: n } = await he(t, {
     // zip path ignores this
     // rar path requires it if you don't colocate worker bundle
@@ -3741,15 +3755,15 @@ async function rn(d) {
   });
   if (n !== "zip")
     throw new Error(`renderGerbersZip expected zip but got ${n}`);
-  return await je(e);
+  return await Xe(e);
 }
-async function nn(d, t) {
+async function sn(d, t) {
   const { files: e } = await he(d, {
     workerUrl: t?.archiveWorkerUrl
   });
-  return await je(e);
+  return await Xe(e);
 }
-const ze = (d) => `data:image/svg+xml;utf8,${encodeURIComponent(d)}`;
+const Pe = (d) => `data:image/svg+xml;utf8,${encodeURIComponent(d)}`;
 function ae(d, t = {}) {
   const {
     side: e = "top",
@@ -3765,7 +3779,7 @@ function ae(d, t = {}) {
   } = t, { wPx: g, hPx: f, svgById: b } = d, a = (R) => {
     if (!R) return "";
     const P = b[R];
-    return P ? `<image xlink:href="${ze(P)}" x="0" y="0" width="${g}" height="${f}" preserveAspectRatio="none"/>` : "";
+    return P ? `<image xlink:href="${Pe(P)}" x="0" y="0" width="${g}" height="${f}" preserveAspectRatio="none"/>` : "";
   }, p = [];
   o && p.push(`<rect x="0" y="0" width="${g}" height="${f}" fill="${i}"/>`);
   const h = d.copper.find((R) => R.role === (e === "top" ? "top" : "bottom"));
@@ -3778,38 +3792,38 @@ function ae(d, t = {}) {
   const w = p.filter(Boolean).join(`
     `);
   let I = w;
-  return r && d.boardMaskId && b[d.boardMaskId] && (I = `<defs><mask id="__board" maskUnits="userSpaceOnUse" style="mask-type:luminance"><image xlink:href="${ze(b[d.boardMaskId])}" x="0" y="0" width="${g}" height="${f}" preserveAspectRatio="none"/></mask></defs>
+  return r && d.boardMaskId && b[d.boardMaskId] && (I = `<defs><mask id="__board" maskUnits="userSpaceOnUse" style="mask-type:luminance"><image xlink:href="${Pe(b[d.boardMaskId])}" x="0" y="0" width="${g}" height="${f}" preserveAspectRatio="none"/></mask></defs>
     <g mask="url(#__board)">
     ${w}
     </g>`), `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${g}" height="${f}" viewBox="0 0 ${g} ${f}">
     ${I}
 </svg>`;
 }
-async function Xe(d) {
+async function We(d) {
   if (d instanceof ArrayBuffer || d instanceof Uint8Array) {
     const { files: t } = await he(d);
     return t;
   }
   return d;
 }
-async function sn(d, t = {}) {
-  const e = await Xe(d), n = await oe(e);
+async function on(d, t = {}) {
+  const e = await We(d), n = await oe(e);
   return ae(n, t);
 }
-function Rr(d) {
+function Er(d) {
   return new Promise((t, e) => {
     const n = new Image();
     n.onload = () => t(n), n.onerror = () => e(new Error("Failed to load composed SVG for rasterization")), n.src = d;
   });
 }
-const Er = async (d, { width: t, height: e, scale: n }) => {
+const Ar = async (d, { width: t, height: e, scale: n }) => {
   if (typeof document > "u" || typeof URL > "u" || !URL.createObjectURL)
     throw new Error(
       "renderGerbersToImage requires a rasterizer backend outside the browser (e.g. resvg-js). Pass opts.rasterizer."
     );
   const o = URL.createObjectURL(new Blob([d], { type: "image/svg+xml" }));
   try {
-    const i = await Rr(o), r = document.createElement("canvas");
+    const i = await Er(o), r = document.createElement("canvas");
     r.width = Math.max(1, Math.round(t * n)), r.height = Math.max(1, Math.round(e * n));
     const s = r.getContext("2d");
     if (!s) throw new Error("Unable to get 2D context for rasterization");
@@ -3821,11 +3835,11 @@ const Er = async (d, { width: t, height: e, scale: n }) => {
     URL.revokeObjectURL(o);
   }
 };
-async function on(d, t = {}) {
-  const e = await Xe(d), n = await oe(e), o = ae(n, t);
-  return (t.rasterizer ?? Er)(o, { width: n.wPx, height: n.hPx, scale: t.scale ?? 1 });
+async function an(d, t = {}) {
+  const e = await We(d), n = await oe(e), o = ae(n, t);
+  return (t.rasterizer ?? Ar)(o, { width: n.wPx, height: n.hPx, scale: t.scale ?? 1 });
 }
-function Ar(d, t, e = 0.01) {
+function Cr(d, t, e = 0.01) {
   const n = {
     min_x_mm: Math.min(d.min_x_mm, t.min_x_mm),
     min_y_mm: Math.min(d.min_y_mm, t.min_y_mm),
@@ -3835,26 +3849,26 @@ function Ar(d, t, e = 0.01) {
   return { union: n, boardSizeChanged: c };
 }
 const ie = 1e3 / 25.4;
-async function Pe(d) {
+async function Te(d) {
   return d instanceof ArrayBuffer || d instanceof Uint8Array ? (await he(d)).files : d;
 }
-function Cr(d) {
+function zr(d) {
   return new Promise((t, e) => {
     const n = new Image();
     n.onload = () => t(n), n.onerror = () => e(new Error("Failed to load composed SVG for diff")), n.src = d;
   });
 }
-async function an(d, t, e = {}) {
+async function ln(d, t, e = {}) {
   if (typeof document > "u")
     throw new Error("diffGerbers requires a browser environment (canvas).");
-  const n = e.alphaThreshold ?? 24, [o, i] = await Promise.all([Pe(d), Pe(t)]), [r, s] = await Promise.all([oe(o), oe(i)]), { union: c, boardSizeChanged: m } = Ar(
+  const n = e.alphaThreshold ?? 24, [o, i] = await Promise.all([Te(d), Te(t)]), [r, s] = await Promise.all([oe(o), oe(i)]), { union: c, boardSizeChanged: m } = Cr(
     { min_x_mm: r.bounds.minX, min_y_mm: r.bounds.minY, max_x_mm: r.bounds.maxX, max_y_mm: r.bounds.maxY },
     { min_x_mm: s.bounds.minX, min_y_mm: s.bounds.minY, max_x_mm: s.bounds.maxX, max_y_mm: s.bounds.maxY }
   ), y = c.max_x_mm - c.min_x_mm, _ = c.max_y_mm - c.min_y_mm, g = Math.max(1, Math.round(y * ie)), f = Math.max(1, Math.round(_ * ie)), b = [], a = async (P, B) => {
     if (!P.copper.some(($) => $.role === (B === "top" ? "top" : "bottom"))) return null;
     const U = ae(P, { side: B, includeFR4: !1, clipToBoard: !0 }), E = URL.createObjectURL(new Blob([U], { type: "image/svg+xml" }));
     try {
-      const $ = await Cr(E), q = document.createElement("canvas");
+      const $ = await zr(E), q = document.createElement("canvas");
       q.width = g, q.height = f;
       const M = q.getContext("2d");
       if (!M) return null;
@@ -3906,22 +3920,22 @@ async function an(d, t, e = {}) {
     revoke: () => b.forEach((P) => URL.revokeObjectURL(P))
   };
 }
-function zr(d) {
+function Pr(d) {
   const t = new TextEncoder().encode(d);
   let e = "";
   for (const o of t) e += String.fromCharCode(o);
   return (typeof btoa < "u" ? btoa(e) : Buffer.from(e, "binary").toString("base64")).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
-function Pr(d) {
+function Tr(d) {
   const t = d.replace(/-/g, "+").replace(/_/g, "/"), e = typeof atob < "u" ? atob(t) : Buffer.from(t, "base64").toString("binary"), n = Uint8Array.from(e, (o) => o.charCodeAt(0));
   return new TextDecoder().decode(n);
 }
-function Tr(d) {
-  return zr(JSON.stringify(d));
-}
 function Br(d) {
+  return Pr(JSON.stringify(d));
+}
+function Or(d) {
   try {
-    const t = JSON.parse(Pr(d)), e = (n) => typeof n == "number" && Number.isFinite(n);
+    const t = JSON.parse(Tr(d)), e = (n) => typeof n == "number" && Number.isFinite(n);
     return t && t.v === 1 && (t.side === "top" || t.side === "bottom") && t.cam && e(t.cam.x) && e(t.cam.y) && e(t.cam.zoom) && (t.cam.rot === void 0 || e(t.cam.rot)) ? t : null;
   } catch {
     return null;
@@ -3961,28 +3975,28 @@ function ge(d, t) {
     c * f + m * p + y * w
   ];
 }
-function Te(d, t) {
+function Be(d, t) {
   return [1, 0, d, 0, 1, t, 0, 0, 1];
 }
-function Or(d, t) {
+function Fr(d, t) {
   return [d, 0, 0, 0, t, 0, 0, 0, 1];
 }
-function Fr(d) {
+function Lr(d) {
   const t = Math.cos(d), e = Math.sin(d);
   return [t, -e, 0, e, t, 0, 0, 0, 1];
 }
-function Be(d, t) {
+function Oe(d, t) {
   const e = d[0] * t.x + d[1] * t.y + d[2], n = d[3] * t.x + d[4] * t.y + d[5], o = d[6] * t.x + d[7] * t.y + d[8];
   if (o === 0) throw new Error("Invalid transform (w=0)");
   return { x: e / o, y: n / o };
 }
-function Lr(d) {
+function Nr(d) {
   const t = d[0], e = d[1], n = d[2], o = d[3], i = d[4], r = d[5], s = t * i - e * o;
   if (Math.abs(s) < 1e-12) throw new Error("Non-invertible transform");
   const c = 1 / s, m = i * c, y = -e * c, _ = -o * c, g = t * c, f = -(m * n + y * r), b = -(_ * n + g * r);
   return [m, y, f, _, g, b, 0, 0, 1];
 }
-class Nr {
+class $r {
   constructor(t, e) {
     this.camera = {
       center_mm: t.center_mm,
@@ -4029,7 +4043,7 @@ class Nr {
         e = { x: t.x_mm ?? 0, y: t.y_mm ?? 0 };
       else
         return { x: NaN, y: NaN };
-      return Be(this.worldToScreenMat, e);
+      return Oe(this.worldToScreenMat, e);
     } catch {
       return { x: NaN, y: NaN };
     }
@@ -4045,17 +4059,17 @@ class Nr {
         e = { x: t.x_px ?? 0, y: t.y_px ?? 0 };
       else
         return { x: NaN, y: NaN };
-      return Be(this.screenToWorldMat, e);
+      return Oe(this.screenToWorldMat, e);
     } catch {
       return { x: NaN, y: NaN };
     }
   }
   recompute() {
-    const { width_px: t, height_px: e } = this.viewport, { center_mm: n, zoom: o, rotation_rad: i, mirrorX: r, mirrorY: s } = this.camera, c = { x: t / 2, y: e / 2 }, m = s ? -1 : 1, y = r ? -1 : 1, _ = Te(-n.x, -n.y), g = Fr(i), f = Or(o * y, o * m), b = Te(c.x, c.y), a = ge(b, ge(f, ge(g, _)));
-    this.worldToScreenMat = a, this.screenToWorldMat = Lr(a);
+    const { width_px: t, height_px: e } = this.viewport, { center_mm: n, zoom: o, rotation_rad: i, mirrorX: r, mirrorY: s } = this.camera, c = { x: t / 2, y: e / 2 }, m = s ? -1 : 1, y = r ? -1 : 1, _ = Be(-n.x, -n.y), g = Lr(i), f = Fr(o * y, o * m), b = Be(c.x, c.y), a = ge(b, ge(f, ge(g, _)));
+    this.worldToScreenMat = a, this.screenToWorldMat = Nr(a);
   }
 }
-class $r {
+class Dr {
   constructor(t) {
     this.onFrame = t, this.pending = !1, this.reasons = /* @__PURE__ */ new Set(), this.rafId = null;
   }
@@ -4077,7 +4091,7 @@ class $r {
     this.rafId !== null && (cancelAnimationFrame(this.rafId), this.rafId = null), this.pending = !1, this.reasons.clear();
   }
 }
-let Dr = class {
+let Ur = class {
   constructor() {
     this.overlays = /* @__PURE__ */ new Map(), this.sortedCache = [], this.dirty = !0;
   }
@@ -4109,7 +4123,7 @@ let Dr = class {
     return this.dirty && (this.sortedCache = Array.from(this.overlays.values()).sort((t, e) => t.zIndex - e.zIndex), this.dirty = !1), this.sortedCache.filter((t) => t.visible);
   }
 };
-class Ur {
+class jr {
   constructor(t) {
     this.cells = /* @__PURE__ */ new Map(), this.cellSize_mm = t;
   }
@@ -4141,9 +4155,9 @@ class Ur {
     return s;
   }
 }
-class jr {
+class Xr {
   constructor() {
-    this.byId = /* @__PURE__ */ new Map(), this.index = new Ur(5), this.dirtyList = !0, this.listCache = [];
+    this.byId = /* @__PURE__ */ new Map(), this.index = new jr(5), this.dirtyList = !0, this.listCache = [];
   }
   clear() {
     this.byId.clear(), this.index.clear(), this.dirtyList = !0;
@@ -4186,7 +4200,7 @@ class jr {
     return i;
   }
 }
-class Xr {
+class Wr {
   constructor(t) {
     this.store = t;
   }
@@ -4200,7 +4214,7 @@ class Xr {
     return m;
   }
 }
-class Wr {
+class Yr {
   constructor() {
     this.handlers = /* @__PURE__ */ new Map();
   }
@@ -4228,7 +4242,7 @@ class Wr {
     this.handlers.clear();
   }
 }
-class Yr {
+class Zr {
   constructor(t) {
     this.listeners = /* @__PURE__ */ new Set(), this.state = {
       gerber: {
@@ -4330,9 +4344,9 @@ class Yr {
     }
   }
 }
-class Zr {
+class Gr {
   constructor(t, e) {
-    this.passes = [], this.overlays = new Dr(), this.resizeObserver = null, this.boardBounds = { minX_mm: 0, minY_mm: 0, maxX_mm: 100, maxY_mm: 100 }, this.markers = new jr(), this.markerPicker = new Xr(this.markers), this.selectedMarkerId = null, this.hoverMarkerId = null, this.events = new Wr(), this.on = this.events.on.bind(this.events), this.once = this.events.once.bind(this.events), this.off = this.events.off.bind(this.events), this.canvas = t;
+    this.passes = [], this.overlays = new Ur(), this.resizeObserver = null, this.boardBounds = { minX_mm: 0, minY_mm: 0, maxX_mm: 100, maxY_mm: 100 }, this.markers = new Xr(), this.markerPicker = new Wr(this.markers), this.selectedMarkerId = null, this.hoverMarkerId = null, this.events = new Yr(), this.on = this.events.on.bind(this.events), this.once = this.events.once.bind(this.events), this.off = this.events.off.bind(this.events), this.canvas = t;
     const n = t.getContext("2d");
     if (!n) throw new Error("Unable to get 2D context");
     this.ctx = n;
@@ -4340,7 +4354,7 @@ class Zr {
       width_px: t.width,
       height_px: t.height
     };
-    this.xform = new Nr(e, o), this.visibility = new Yr(), this.scheduler = new $r(() => this.render()), this.overlayApi = {
+    this.xform = new $r(e, o), this.visibility = new Zr(), this.scheduler = new Dr(() => this.render()), this.overlayApi = {
       boardToScreen: ({ x_mm: i, y_mm: r }) => {
         const s = this.xform.boardToScreen({ x: i, y: r });
         return { x_px: s.x, y_px: s.y };
@@ -4606,13 +4620,13 @@ class Zr {
     };
   }
 }
-function Gr(d, t) {
+function qr(d, t) {
   return {
     x_mm: d.x_mm,
     y_mm: t.minY_mm + t.maxY_mm - d.y_mm
   };
 }
-function qr(d, t) {
+function Vr(d, t) {
   return d.x_mm < t.minX_mm || d.x_mm > t.maxX_mm || d.y_mm < t.minY_mm || d.y_mm > t.maxY_mm;
 }
 const Jt = {
@@ -4623,7 +4637,7 @@ const Jt = {
   SELECTION_MIN: 300,
   SELECTION_MAX: 399
 };
-function cn(d, t, e, n) {
+function dn(d, t, e, n) {
   return {
     id: `gerber:${d}`,
     order: t,
@@ -4634,7 +4648,7 @@ function cn(d, t, e, n) {
     }
   };
 }
-class Vr {
+class Hr {
   constructor() {
     this.overlays = /* @__PURE__ */ new Map();
   }
@@ -4658,7 +4672,7 @@ class Vr {
     return Array.from(this.overlays.values());
   }
 }
-function Hr(d, t) {
+function Kr(d, t) {
   return {
     id: "overlay:all",
     order: (Jt.OVERLAYS_MIN + Jt.OVERLAYS_MAX) / 2,
@@ -4677,7 +4691,7 @@ function Hr(d, t) {
     }
   };
 }
-let Kr = class {
+let Jr = class {
   constructor() {
     this.markers = /* @__PURE__ */ new Map();
   }
@@ -4735,7 +4749,7 @@ let Kr = class {
     t.fill(), t.strokeStyle = "white", t.lineWidth = 1, t.stroke();
   }
 };
-function Jr(d) {
+function Qr(d) {
   return {
     id: "markers",
     order: (Jt.MARKERS_MIN + Jt.MARKERS_MAX) / 2,
@@ -4743,7 +4757,7 @@ function Jr(d) {
     draw: (t) => d.draw(t)
   };
 }
-class Qr {
+class tn {
   /**
    * @param getMarkerPosition optional lookup returning a marker's board-space
    *   position (mm) by id, so a marker selection can be highlighted where the
@@ -4784,7 +4798,7 @@ class Qr {
     );
   }
 }
-function tn(d, t) {
+function en(d, t) {
   return {
     id: "selection",
     order: (Jt.SELECTION_MIN + Jt.SELECTION_MAX) / 2,
@@ -4796,7 +4810,7 @@ function tn(d, t) {
     }
   };
 }
-function un(d, t = {}) {
+function hn(d, t = {}) {
   const e = `
 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
   <path d="M12 3v10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
@@ -4873,7 +4887,7 @@ function un(d, t = {}) {
       </div>
     </div>
   `;
-  const o = d.firstElementChild, i = k(o, "#board-viewport"), r = k(o, "#render-canvas"), s = k(o, "#grid-toggle"), c = k(o, "#grid-units"), m = k(o, "#fit-btn"), y = k(o, "#share-btn"), _ = n ? k(o, "#download-btn") : null, g = Array.from(o.querySelectorAll('input[name="side"]')), f = k(o, "#layer-menu-btn"), b = k(o, "#layer-panel"), a = k(o, "#export-menu-btn"), p = k(o, "#export-panel"), h = new Zr(r, {
+  const o = d.firstElementChild, i = k(o, "#board-viewport"), r = k(o, "#render-canvas"), s = k(o, "#grid-toggle"), c = k(o, "#grid-units"), m = k(o, "#fit-btn"), y = k(o, "#share-btn"), _ = n ? k(o, "#download-btn") : null, g = Array.from(o.querySelectorAll('input[name="side"]')), f = k(o, "#layer-menu-btn"), b = k(o, "#layer-panel"), a = k(o, "#export-menu-btn"), p = k(o, "#export-panel"), h = new Gr(r, {
     center_mm: { x: 50, y: 50 },
     // Start with a reasonable center
     zoom: 5,
@@ -4885,7 +4899,7 @@ function un(d, t = {}) {
   x.subscribe(() => {
     h.requestRender("visibility-change");
   });
-  const w = new Vr(), I = new Kr(), R = new Qr((S) => I.get(S)?.position);
+  const w = new Hr(), I = new Jr(), R = new tn((S) => I.get(S)?.position);
   let P = null;
   function B() {
     const S = i.getBoundingClientRect();
@@ -4924,7 +4938,7 @@ function un(d, t = {}) {
       }
     }
   };
-  w.add(U), x.setOverlayVisibility("grid", !1), x.setMarkersVisibility(!1), h.addPass(Hr(w, h.getOverlayApi())), h.addPass(Jr(I)), h.addPass(tn(R, () => P));
+  w.add(U), x.setOverlayVisibility("grid", !1), x.setMarkersVisibility(!1), h.addPass(Kr(w, h.getOverlayApi())), h.addPass(Qr(I)), h.addPass(en(R, () => P));
   const E = {}, $ = {
     "layer:fr4": { label: "FR4 substrate", color: "#1a5f1a" },
     "layer:drills": { label: "Drill holes", color: "#111111" },
@@ -5260,7 +5274,7 @@ function un(d, t = {}) {
   }
   function Et() {
     const S = new URL(location.href);
-    return S.hash = `gv=${Tr(ht())}`, S.toString();
+    return S.hash = `gv=${Br(ht())}`, S.toString();
   }
   async function jt() {
     const S = Et();
@@ -5277,7 +5291,7 @@ function un(d, t = {}) {
   function Ct() {
     const S = /(?:^|[#&])gv=([^&]+)/.exec(location.hash || "");
     if (!S) return !1;
-    const z = Br(S[1]);
+    const z = Or(S[1]);
     return z ? (dt(z), !0) : !1;
   }
   let zt = null;
@@ -5308,7 +5322,7 @@ function un(d, t = {}) {
   function Ot(S, z) {
     const G = M?.board?.mm_bounds;
     if (!G) return { x: S, y: z };
-    const K = Gr(
+    const K = qr(
       { x_mm: S, y_mm: z },
       { minX_mm: G.min_x_mm, minY_mm: G.min_y_mm, maxX_mm: G.max_x_mm, maxY_mm: G.max_y_mm }
     );
@@ -5398,7 +5412,7 @@ function un(d, t = {}) {
     }
   };
 }
-function hn(d, t) {
+function fn(d, t) {
   return {
     id: "overlay:all",
     order: Jt.OVERLAYS_MIN,
@@ -5410,7 +5424,7 @@ function hn(d, t) {
     }
   };
 }
-function fn() {
+function mn() {
   return {
     id: "dfm:dots",
     zIndex: 50,
@@ -5428,7 +5442,7 @@ function fn() {
     }
   };
 }
-function mn(d) {
+function pn(d) {
   return {
     id: "ui:tooltip",
     zIndex: 200,
@@ -5440,7 +5454,7 @@ function mn(d) {
     }
   };
 }
-function pn(d = 1) {
+function yn(d = 1) {
   return {
     id: "grid:custom",
     zIndex: 10,
@@ -5457,7 +5471,7 @@ function pn(d = 1) {
     }
   };
 }
-function yn(d) {
+function gn(d) {
   let t = 0;
   return {
     id: "marker:pulsing",
@@ -5471,7 +5485,7 @@ function yn(d) {
     }
   };
 }
-class en {
+class rn {
   constructor(t) {
     this.store = t;
   }
@@ -5491,7 +5505,7 @@ class en {
       }
       const c = t.boardToScreen({ x: s.x_mm, y: s.y_mm }), m = c.x, y = c.y;
       if (m < -10 || y < -10 || m > o + 10 || y > i + 10) continue;
-      const _ = e?.boardBounds ? qr({ x_mm: s.x_mm, y_mm: s.y_mm }, e.boardBounds) : !1;
+      const _ = e?.boardBounds ? Vr({ x_mm: s.x_mm, y_mm: s.y_mm }, e.boardBounds) : !1;
       this.applyMarkerStyling(t.ctx, s, e?.selectedId === s.id, e?.hoverId === s.id, _), t.ctx.beginPath(), t.ctx.arc(m, y, r, 0, Math.PI * 2), e?.selectedId === s.id ? (t.ctx.lineWidth = 2, t.ctx.stroke()) : t.ctx.fill();
     }
   }
@@ -5521,8 +5535,8 @@ class en {
     }
   }
 }
-function gn(d, t) {
-  const e = new en(d);
+function _n(d, t) {
+  const e = new rn(d);
   return {
     id: "markers",
     order: Jt.MARKERS_MIN,
@@ -5540,39 +5554,39 @@ function gn(d, t) {
   };
 }
 export {
-  Wr as Emitter,
+  Yr as Emitter,
   Mt as GerberError,
-  Xr as MarkerPicker,
-  en as MarkerRenderer,
-  jr as MarkerStore,
-  Dr as OverlayRegistry,
-  $r as RenderScheduler,
-  Qr as SelectionRenderer,
-  Ur as UniformGridIndex,
-  Zr as Viewer,
-  Nr as ViewportTransform,
-  Yr as VisibilityManager,
+  Wr as MarkerPicker,
+  rn as MarkerRenderer,
+  Xr as MarkerStore,
+  Ur as OverlayRegistry,
+  Dr as RenderScheduler,
+  tn as SelectionRenderer,
+  jr as UniformGridIndex,
+  Gr as Viewer,
+  $r as ViewportTransform,
+  Zr as VisibilityManager,
   ae as composeStackToSvg,
-  Ar as computeDiffAlignment,
-  un as createBoardViewer,
-  cn as createGerberPass,
-  pn as createGridOverlay,
-  un as createIntegratedViewer,
-  gn as createMarkerPass,
-  hn as createOverlayPass,
-  yn as createPulsingMarkerOverlay,
-  tn as createSelectionPass,
-  mn as createTooltipOverlay,
-  fn as createViolationDotsOverlay,
-  Br as decodeViewState,
-  tr as detectGerberBundle,
-  an as diffGerbers,
-  Tr as encodeViewState,
+  Cr as computeDiffAlignment,
+  hn as createBoardViewer,
+  dn as createGerberPass,
+  yn as createGridOverlay,
+  hn as createIntegratedViewer,
+  _n as createMarkerPass,
+  fn as createOverlayPass,
+  gn as createPulsingMarkerOverlay,
+  en as createSelectionPass,
+  pn as createTooltipOverlay,
+  mn as createViolationDotsOverlay,
+  Or as decodeViewState,
+  er as detectGerberBundle,
+  ln as diffGerbers,
+  Br as encodeViewState,
   oe as renderGerberSvgDocs,
-  nn as renderGerbers,
-  je as renderGerbersFiles,
-  on as renderGerbersToImage,
-  sn as renderGerbersToSvg,
-  rn as renderGerbersZip
+  sn as renderGerbers,
+  Xe as renderGerbersFiles,
+  an as renderGerbersToImage,
+  on as renderGerbersToSvg,
+  nn as renderGerbersZip
 };
 //# sourceMappingURL=gerbers-renderer.es.js.map

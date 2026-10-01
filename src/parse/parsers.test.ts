@@ -40,6 +40,34 @@ describe("parseGerberFile", () => {
     expect(f.heightMm).toBeCloseTo(2.0, 6);
   });
 
+  it("parses a standard polygon aperture (Eagle octagon) as its real outline", () => {
+    const src = [
+      "%MOMM*%",
+      "%FSLAX34Y34*%",
+      "%ADD10P,1.429621X8X112.500000*%", // verbatim from an EAGLE 9 export
+      "D10*",
+      "X100000Y50000D03*",
+      "M02*",
+    ].join("\n");
+
+    const f = parseGerberFile("top.gtl", src, "TopCopper").flashes[0];
+    const loop = f.loops![0];
+    expect(loop).toHaveLength(8);
+    const r = 1.429621 / 2;
+    for (const p of loop) expect(Math.hypot(p.x - 10, p.y - 5)).toBeCloseTo(r, 6);
+    const first = (Math.atan2(loop[0].y - 5, loop[0].x - 10) * 180) / Math.PI;
+    expect(first).toBeCloseTo(112.5, 4);
+    // the vertex count must not leak into the size (it used to become an 8 mm height)
+    expect(f.heightMm).toBeLessThan(1.43);
+  });
+
+  it("scales polygon apertures in inch files", () => {
+    const src = ["%MOIN*%", "%FSLAX24Y24*%", "%ADD10P,0.1X4*%", "D10*", "X0Y0D03*", "M02*"].join("\n");
+    const f = parseGerberFile("top.gtl", src, "TopCopper").flashes[0];
+    // square with vertices on the axes: 2.54 mm corner to corner
+    expect(f.widthMm).toBeCloseTo(2.54, 6);
+  });
+
   it("tracks LPD/LPC polarity in the ordered ops", () => {
     const src = [
       "%FSLAX23Y23*%",
