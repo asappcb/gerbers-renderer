@@ -1,6 +1,6 @@
 // src/render/renderGerbersFiles.ts
 
-import type { BoardGeom, ViewerLayers, BoardStackup, CopperLayer } from "../viewer/types";
+import type { BoardGeom, ViewerLayers, BoardStackup, CopperLayer, BoardGeometry, BoardFeature } from "../viewer/types";
 import { classifyStackup } from "./layerClassify";
 import { parseGerberFile } from "../parse/gerber-parser";
 import { parseDrillFile, type DrillSlot } from "../parse/drill-parser";
@@ -41,8 +41,10 @@ function scaleGerberPrims(prims: ReturnType<typeof parseGerberFile>, s: number) 
       ...f,
       position: { x: f.position.x * s, y: f.position.y * s },
       diameterMm: (f.diameterMm ?? 0) * s,
-      widthMm: (f.widthMm ?? 0) * s,
-      heightMm: (f.heightMm ?? 0) * s,
+      // Keep "not set" as undefined: round pads have no width/height, and a 0
+      // here would win over diameterMm in `widthMm ?? diameterMm`.
+      widthMm: f.widthMm !== undefined ? f.widthMm * s : undefined,
+      heightMm: f.heightMm !== undefined ? f.heightMm * s : undefined,
       loops: f.loops?.map((loop) => loop.map((p) => ({ x: p.x * s, y: p.y * s }))),
     })),
     regions: prims.regions.map((r) => ({
@@ -688,6 +690,8 @@ export type RenderResult = {
   layers: ViewerLayers;
   /** First-class ordered board stackup (canonical multilayer structure). */
   stackup: BoardStackup;
+  /** Parsed geometry + stats (world coords) for inspection/measurement/connectivity. */
+  geometry: BoardGeometry;
   revoke: () => void;
 };
 
@@ -721,6 +725,8 @@ export interface SvgRenderResult {
   bottom?: { maskId?: string; silkId?: string; pasteId?: string };
   drillsId?: string;
   viasId?: string;
+  /** Parsed geometry + stats (world coords). */
+  geometry: BoardGeometry;
 }
 
 /**
@@ -945,8 +951,9 @@ export async function renderGerberSvgDocs(files: Record<string, Uint8Array>): Pr
   for (let i = 0; i < innerCopperPrimsN.length; i++) {
     const prims = innerCopperPrimsN[i];
     if (prims) {
-      const num = innerRefs[i]?.detectedNum ?? (i + 1);
-      innerCopperIds.push(emit(`cu.in${num}`, buildLayerSvgWithPolarityMask(prims, b, INNER_COLORS[i % INNER_COLORS.length], 1.0)));
+      // Id by physical ordinal (1-based among inners) — unique and matching the
+      // viewer's deriveStackup(); detectedNum is used only for the display label.
+      innerCopperIds.push(emit(`cu.in${i + 1}`, buildLayerSvgWithPolarityMask(prims, b, INNER_COLORS[i % INNER_COLORS.length], 1.0)));
     } else {
       innerCopperIds.push("");
     }
@@ -972,12 +979,50 @@ export async function renderGerberSvgDocs(files: Record<string, Uint8Array>): Pr
       const j = innerRefs.indexOf(ref);
       svgId = innerCopperIds[j] || undefined;
       color = INNER_COLORS[j % INNER_COLORS.length];
-      const label = ref.detectedNum ?? (j + 1);
-      name = `Inner ${label}`;
-      id = `cu.in${label}`;
+      // Label by detected number (e.g. In4 → "Inner 4"); id by ordinal for uniqueness.
+      name = `Inner ${ref.detectedNum ?? (j + 1)}`;
+      id = `cu.in${j + 1}`;
     }
     if (svgId) copper.push({ id, index: ref.index, role: ref.role, name, color, svgId });
   }
+
+  // Parsed geometry (world coords, Y-flipped to match the viewer/marker frame).
+  const worldY = (y: number) => b.minY + b.maxY - y;
+  const feats: BoardFeature[] = [];
+  let minTraceW = Infinity;
+  const addLayerFeatures = (prims: ReturnType<typeof parseGerberFile> | null, layerId: string) => {
+    if (!prims) return;
+    // Clear-polarity (LPC) objects are cut-outs, not copper.
+    for (const f of prims.flashes) {
+      if (f.polarity === "clear") continue;
+      const w = f.widthMm ?? f.diameterMm ?? 0;
+      const h = f.heightMm ?? f.diameterMm ?? 0;
+      feats.push({ kind: "pad", layer: layerId, x_mm: f.position.x, y_mm: worldY(f.position.y), w_mm: w, h_mm: h, shape: f.shape });
+    }
+    for (const t of prims.tracks) {
+      if (t.polarity === "clear") continue;
+      feats.push({ kind: "trace", layer: layerId, x1_mm: t.start.x, y1_mm: worldY(t.start.y), x2_mm: t.end.x, y2_mm: worldY(t.end.y), width_mm: t.width });
+      if (t.width > 0) minTraceW = Math.min(minTraceW, t.width);
+    }
+  };
+  addLayerFeatures(topPrimsN, "cu.top");
+  addLayerFeatures(botPrimsN, "cu.bottom");
+  innerCopperPrimsN.forEach((p, j) => addLayerFeatures(p, `cu.in${j + 1}`));
+  for (const hole of drillHolesN) feats.push({ kind: "hole", x_mm: hole.x, y_mm: worldY(hole.y), diameter_mm: hole.diameter });
+
+  const drillSizesMm = Array.from(new Set(drillHolesN.map((h) => Math.round(h.diameter * 1000) / 1000))).sort((a, z) => a - z);
+  const geometry: BoardGeometry = {
+    features: feats,
+    stats: {
+      widthMm: b.maxX - b.minX,
+      heightMm: b.maxY - b.minY,
+      copperLayers: copper.length,
+      padCount: feats.filter((f) => f.kind === "pad").length,
+      holeCount: drillHolesN.length + drillSlotsN.length,
+      drillSizesMm,
+      minTraceWidthMm: minTraceW === Infinity ? undefined : minTraceW,
+    },
+  };
 
   return {
     boardGeom,
@@ -985,6 +1030,7 @@ export async function renderGerberSvgDocs(files: Record<string, Uint8Array>): Pr
     wPx,
     hPx,
     svgById,
+    geometry,
     boardMaskId,
     copper,
     top: (topMaskId || topSilkId || topPasteId) ? { maskId: topMaskId, silkId: topSilkId, pasteId: topPasteId } : undefined,
@@ -995,12 +1041,10 @@ export async function renderGerberSvgDocs(files: Record<string, Uint8Array>): Pr
 }
 
 /**
- * Browser render: produce blob-URL-backed layers + stackup for the viewer.
- * Thin wrapper over the pure `renderGerberSvgDocs` core.
+ * Wrap a pure SvgRenderResult into a blob-URL-backed RenderResult for the viewer.
+ * Shared by the direct browser path and the web-worker path.
  */
-export async function renderGerbersFiles(files: Record<string, Uint8Array>): Promise<RenderResult> {
-  const docs = await renderGerberSvgDocs(files);
-
+export function svgDocsToRenderResult(docs: SvgRenderResult): RenderResult {
   const urls: string[] = [];
   const urlById = new Map<string, string>();
   for (const [id, svg] of Object.entries(docs.svgById)) {
@@ -1047,6 +1091,15 @@ export async function renderGerbersFiles(files: Record<string, Uint8Array>): Pro
     boardGeom: docs.boardGeom,
     layers,
     stackup,
+    geometry: docs.geometry,
     revoke: () => urls.forEach((u) => URL.revokeObjectURL(u)),
   };
+}
+
+/**
+ * Browser render: produce blob-URL-backed layers + stackup for the viewer.
+ * Thin wrapper over the pure `renderGerberSvgDocs` core.
+ */
+export async function renderGerbersFiles(files: Record<string, Uint8Array>): Promise<RenderResult> {
+  return svgDocsToRenderResult(await renderGerberSvgDocs(files));
 }

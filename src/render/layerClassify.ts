@@ -155,42 +155,43 @@ export function classifyLayerNames(names: string[]): Classified {
     return true;
   });
 
+  // Extension lists include Eagle CAM defaults (.cmp/.sol/.stc/.sts/.plc/.pls).
   const top_copper =
-    pickByExt(files, [".gtl"]) ||
+    pickByExt(files, [".gtl", ".cmp"]) ||
     pickByContains(files, ["f_cu"]) ||
     pickByContains(files, ["top", "cu"]) ||
     pickByContains(files, ["top", "copper"]);
 
   const bottom_copper =
-    pickByExt(files, [".gbl"]) ||
+    pickByExt(files, [".gbl", ".sol"]) ||
     pickByContains(files, ["b_cu"]) ||
     pickByContains(files, ["bottom", "cu"]) ||
     pickByContains(files, ["bottom", "copper"]);
 
   const top_mask =
-    pickByExt(files, [".gts"]) ||
+    pickByExt(files, [".gts", ".stc"]) ||
     pickByContains(files, ["f_mask"]) ||
     pickByContains(files, ["top", "mask"]);
 
   const bottom_mask =
-    pickByExt(files, [".gbs"]) ||
+    pickByExt(files, [".gbs", ".sts"]) ||
     pickByContains(files, ["b_mask"]) ||
     pickByContains(files, ["bottom", "mask"]);
 
   const top_silk =
-    pickByExt(files, [".gto"]) ||
+    pickByExt(files, [".gto", ".plc"]) ||
     pickByContains(files, ["f_silks"]) ||
     pickByContains(files, ["f_silk"]) ||
     pickByContains(files, ["top", "silk"]);
 
   const bottom_silk =
-    pickByExt(files, [".gbo"]) ||
+    pickByExt(files, [".gbo", ".pls"]) ||
     pickByContains(files, ["b_silks"]) ||
     pickByContains(files, ["b_silk"]) ||
     pickByContains(files, ["bottom", "silk"]);
 
   const outline =
-    pickByExt(files, [".gko", ".gm1"]) ||
+    pickByExt(files, [".gko", ".gm1", ".gml", ".oln"]) ||
     pickByContains(files, ["edge", "cuts"]) ||
     pickByContains(files, ["outline"]) ||
     pickByContains(files, ["board", "outline"]);

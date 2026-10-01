@@ -59,4 +59,43 @@ describe("classifyStackup", () => {
     expect(s.top_paste).toBeTruthy();
     expect(s.bottom_paste).toBeTruthy();
   });
+
+  // --- Vendor-export fixtures (H2) ---
+
+  it("classifies an Eagle CAM export (.cmp/.sol/.stc/.plc)", () => {
+    const s = classifyStackup([
+      "board.cmp", "board.sol", "board.stc", "board.sts",
+      "board.plc", "board.pls", "board.oln", "board.drd",
+    ]);
+    expect(s.copper.map((c) => c.role)).toEqual(["top", "bottom"]);
+    expect(s.top_mask).toBe("board.stc");
+    expect(s.top_silk).toBe("board.plc");
+    expect(s.outline).toBe("board.oln");
+  });
+
+  it("classifies a JLCPCB-style export (Gerber_TopLayer.GTL etc.)", () => {
+    const s = classifyStackup([
+      "Gerber_TopLayer.GTL", "Gerber_BottomLayer.GBL",
+      "Gerber_TopSolderMaskLayer.GTS", "Gerber_BottomSolderMaskLayer.GBS",
+      "Gerber_TopSilkscreenLayer.GTO", "Gerber_BoardOutlineLayer.GKO",
+      "Drill_PTH_Through.DRL",
+    ]);
+    expect(s.copper.map((c) => c.role)).toEqual(["top", "bottom"]);
+    expect(s.top_mask).toBe("Gerber_TopSolderMaskLayer.GTS");
+    expect(s.top_silk).toBe("Gerber_TopSilkscreenLayer.GTO");
+    expect(s.outline).toBe("Gerber_BoardOutlineLayer.GKO");
+    expect(s.drills?.length).toBe(1);
+  });
+
+  it("classifies a full KiCad export with paste + inner + multiple drills", () => {
+    const s = classifyStackup([
+      "brd-F_Cu.gbr", "brd-In1_Cu.gbr", "brd-In2_Cu.gbr", "brd-B_Cu.gbr",
+      "brd-F_Mask.gbr", "brd-B_Mask.gbr", "brd-F_Paste.gbr",
+      "brd-F_Silkscreen.gbr", "brd-Edge_Cuts.gbr",
+      "brd-PTH.drl", "brd-NPTH.drl",
+    ]);
+    expect(s.copper.map((c) => c.role)).toEqual(["top", "inner", "inner", "bottom"]);
+    expect(s.top_paste).toBeTruthy();
+    expect(s.drills?.length).toBe(2);
+  });
 });

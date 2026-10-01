@@ -9,7 +9,7 @@
 import { renderGerberSvgDocs } from "./renderGerbersFiles";
 import { composeStackToSvg } from "./headless";
 import { unpackGerberArchive } from "../io/unpackArchive";
-import type { BoardGeom } from "../viewer/types";
+import type { BoardGeom, BoardGeometry, BoardFeature } from "../viewer/types";
 
 export type DiffInput = ArrayBuffer | Uint8Array | Record<string, Uint8Array>;
 
@@ -72,6 +72,106 @@ export interface DiffOptions {
 }
 
 const K = 1000 / 25.4; // px per mm — matches the render resolution
+
+// ---------------------------------------------------------------------------
+// Per-layer geometry diff (D1): compares parsed features (pads/traces/holes)
+// between two boards, reporting added/removed features per layer. Pure.
+// ---------------------------------------------------------------------------
+
+export interface LayerGeometryDiff {
+  added: BoardFeature[];
+  removed: BoardFeature[];
+  unchanged: number;
+}
+
+export interface GeometryDiff {
+  /** Keyed by layer id ("cu.top", "cu.in1", …) plus "drills" for holes. */
+  perLayer: Record<string, LayerGeometryDiff>;
+  summary: { addedCount: number; removedCount: number; unchangedCount: number };
+}
+
+function featureLayerKey(f: BoardFeature): string {
+  return f.kind === "hole" ? "drills" : f.layer;
+}
+
+// Features match when they share kind/layer/shape and every size and
+// coordinate agrees within `tol`. Matching is one-to-one, so duplicate
+// features are counted, not merged.
+function sameFeature(a: BoardFeature, b: BoardFeature, tol: number): boolean {
+  const near = (x: number, y: number) => Math.abs(x - y) <= tol;
+  if (a.kind === "pad" && b.kind === "pad") {
+    return a.layer === b.layer && a.shape === b.shape &&
+      near(a.x_mm, b.x_mm) && near(a.y_mm, b.y_mm) && near(a.w_mm, b.w_mm) && near(a.h_mm, b.h_mm);
+  }
+  if (a.kind === "hole" && b.kind === "hole") {
+    return near(a.x_mm, b.x_mm) && near(a.y_mm, b.y_mm) && near(a.diameter_mm, b.diameter_mm);
+  }
+  if (a.kind === "trace" && b.kind === "trace") {
+    if (a.layer !== b.layer || !near(a.width_mm, b.width_mm)) return false;
+    // Traces are undirected.
+    const fwd = near(a.x1_mm, b.x1_mm) && near(a.y1_mm, b.y1_mm) && near(a.x2_mm, b.x2_mm) && near(a.y2_mm, b.y2_mm);
+    const rev = near(a.x1_mm, b.x2_mm) && near(a.y1_mm, b.y2_mm) && near(a.x2_mm, b.x1_mm) && near(a.y2_mm, b.y1_mm);
+    return fwd || rev;
+  }
+  return false;
+}
+
+// Spatial anchors for the grid index (a trace is indexed at both ends).
+function anchors(f: BoardFeature): Array<[number, number]> {
+  if (f.kind === "trace") return [[f.x1_mm, f.y1_mm], [f.x2_mm, f.y2_mm]];
+  return [[f.x_mm, f.y_mm]];
+}
+
+/**
+ * Diff two boards' parsed geometry, per layer. A feature present only in B is
+ * "added", only in A is "removed". Coordinates are matched with a tolerance.
+ */
+export function diffGeometry(a: BoardGeometry, b: BoardGeometry, tol = 0.05): GeometryDiff {
+  // Grid cells of size `tol`: any match lies in the same or a neighbouring cell.
+  const cell = Math.max(tol, 1e-6);
+  const cellKey = (x: number, y: number) => `${Math.floor(x / cell)},${Math.floor(y / cell)}`;
+
+  const grid = new Map<string, number[]>();
+  b.features.forEach((f, i) => {
+    for (const [x, y] of anchors(f)) {
+      const k = cellKey(x, y);
+      const list = grid.get(k);
+      if (list) list.push(i); else grid.set(k, [i]);
+    }
+  });
+  const matchedB = new Uint8Array(b.features.length);
+
+  const perLayer: Record<string, LayerGeometryDiff> = {};
+  const layer = (id: string) => (perLayer[id] ??= { added: [], removed: [], unchanged: 0 });
+
+  let addedCount = 0, removedCount = 0, unchangedCount = 0;
+  for (const fa of a.features) {
+    const [x, y] = anchors(fa)[0];
+    const cx = Math.floor(x / cell);
+    const cy = Math.floor(y / cell);
+    let hit = -1;
+    search: for (let dx = -1; dx <= 1; dx++) {
+      for (let dy = -1; dy <= 1; dy++) {
+        for (const i of grid.get(`${cx + dx},${cy + dy}`) ?? []) {
+          if (!matchedB[i] && sameFeature(fa, b.features[i], tol)) { hit = i; break search; }
+        }
+      }
+    }
+    if (hit >= 0) {
+      matchedB[hit] = 1;
+      layer(featureLayerKey(fa)).unchanged++;
+      unchangedCount++;
+    } else {
+      layer(featureLayerKey(fa)).removed.push(fa);
+      removedCount++;
+    }
+  }
+  b.features.forEach((fb, i) => {
+    if (!matchedB[i]) { layer(featureLayerKey(fb)).added.push(fb); addedCount++; }
+  });
+
+  return { perLayer, summary: { addedCount, removedCount, unchangedCount } };
+}
 
 async function toFiles(input: DiffInput): Promise<Record<string, Uint8Array>> {
   if (input instanceof ArrayBuffer || input instanceof Uint8Array) {

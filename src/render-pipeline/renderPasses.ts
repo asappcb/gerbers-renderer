@@ -1,5 +1,9 @@
-import { RenderCtx, RenderPass, VisibilityState, RENDER_ORDER, OverlayApi } from './core/renderContract';
-import { ViewportTransform, Vec2 } from './core/viewportTransform';
+import { RenderCtx, RenderPass, VisibilityState, RENDER_ORDER } from './core/renderContract';
+
+// NOTE: the marker and overlay systems live in their dedicated modules
+// (markerStore/markerRenderer/markerPass/markerPicker and
+// overlayRegistry/overlayPass). This file only holds the base Gerber pass and
+// the selection pass.
 
 // Base Gerber Passes
 export function createGerberPass(
@@ -15,200 +19,13 @@ export function createGerberPass(
     draw: (rc) => {
       const ctx = rc.ctx;
       const m = rc.xform.getWorldToScreenMatrix();
-      
+
       // Set transform to draw in board coordinates (mm)
       ctx.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
-      
+
       // Draw the layer
       drawLayer(ctx);
     },
-  };
-}
-
-// Overlay System
-export interface Overlay {
-  id: string;
-  visible: boolean;
-  zIndex: number;
-  draw: (ctx: CanvasRenderingContext2D, helpers: OverlayHelpers) => void;
-}
-
-export interface OverlayHelpers {
-  boardToScreen: (p: { x: number; y: number }) => { x: number; y: number };
-  screenToBoard: (p: { x: number; y: number }) => { x: number; y: number };
-  xform: ViewportTransform;
-  view: ReturnType<ViewportTransform['getCamera']>;
-}
-
-export class OverlayRegistry {
-  private overlays = new Map<string, Overlay>();
-
-  add(overlay: Overlay) {
-    this.overlays.set(overlay.id, overlay);
-  }
-
-  remove(id: string): boolean {
-    return this.overlays.delete(id);
-  }
-
-  get(id: string): Overlay | undefined {
-    return this.overlays.get(id);
-  }
-
-  getSortedVisible(): Overlay[] {
-    return Array.from(this.overlays.values())
-      .filter(overlay => overlay.visible)
-      .sort((a, b) => a.zIndex - b.zIndex);
-  }
-
-  setVisible(id: string, visible: boolean) {
-    const overlay = this.overlays.get(id);
-    if (overlay) {
-      overlay.visible = visible;
-    }
-  }
-
-  getAll(): Overlay[] {
-    return Array.from(this.overlays.values());
-  }
-}
-
-export function createOverlayPass(registry: OverlayRegistry, overlayApi: OverlayApi): RenderPass {
-  return {
-    id: "overlay:all",
-    order: (RENDER_ORDER.OVERLAYS_MIN + RENDER_ORDER.OVERLAYS_MAX) / 2,
-    enabled: (rc: RenderCtx) => true,
-    draw: (rc) => {
-      // Get all overlays and filter by visibility manager state
-      const overlays = registry.getAll();
-      const visibleOverlays = overlays.filter(overlay => {
-        const isVisible = rc.visibility.overlays[overlay.id] ?? overlay.visible;
-        return isVisible;
-      });
-      
-      // Sort by zIndex and draw
-      visibleOverlays.sort((a, b) => a.zIndex - b.zIndex);
-      
-      // Create OverlayHelpers for overlays
-      const helpers = {
-        boardToScreen: rc.boardToScreen,
-        screenToBoard: rc.screenToBoard,
-        xform: rc.xform,
-        view: rc.xform.getCamera(),
-      };
-      
-      for (const overlay of visibleOverlays) {
-        rc.ctx.save();
-        overlay.draw(rc.ctx, helpers);
-        rc.ctx.restore();
-      }
-    },
-  };
-}
-
-// Marker System
-export interface Marker {
-  id: string;
-  position: { x: number; y: number }; // Board coordinates (mm)
-  type: 'via' | 'pad' | 'component' | 'testpoint' | 'custom';
-  data?: any;
-}
-
-export class MarkerRenderer {
-  private markers = new Map<string, Marker>();
-
-  add(marker: Marker) {
-    this.markers.set(marker.id, marker);
-  }
-
-  remove(id: string): boolean {
-    return this.markers.delete(id);
-  }
-
-  get(id: string): Marker | undefined {
-    return this.markers.get(id);
-  }
-
-  getAll(): Marker[] {
-    return Array.from(this.markers.values());
-  }
-
-  clear() {
-    this.markers.clear();
-  }
-
-  draw(rc: RenderCtx) {
-    const ctx = rc.ctx;
-    const zoom = rc.xform.getCamera().zoom;
-    
-    // LOD: hide markers when zoomed out too far
-    const minZoom = 2; // pixels per mm
-    if (zoom < minZoom) return;
-
-    // Set transform for screen-space drawing (markers are screen-space sized)
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-
-    for (const marker of this.markers.values()) {
-      // Validate marker position exists
-      if (!marker.position || typeof marker.position.x !== 'number' || typeof marker.position.y !== 'number' ||
-          !isFinite(marker.position.x) || !isFinite(marker.position.y)) {
-        console.warn(`Invalid marker position for ${marker.id}:`, { 
-          position: marker.position, 
-          marker: marker,
-          keys: Object.keys(marker)
-        });
-        continue;
-      }
-
-      const screenPos = rc.boardToScreen(marker.position);
-      
-      // Skip if outside viewport
-      if (screenPos.x < -10 || screenPos.x > rc.viewport.width_px + 10 ||
-          screenPos.y < -10 || screenPos.y > rc.viewport.height_px + 10) {
-        continue;
-      }
-
-      this.drawMarker(ctx, screenPos, marker, zoom);
-    }
-  }
-
-  private drawMarker(ctx: CanvasRenderingContext2D, screenPos: { x: number; y: number }, marker: Marker, zoom: number) {
-    const radius = Math.max(3, Math.min(8, zoom / 5)); // Scale with zoom but clamp
-    
-    ctx.beginPath();
-    ctx.arc(screenPos.x, screenPos.y, radius, 0, Math.PI * 2);
-    
-    // Color by type
-    switch (marker.type) {
-      case 'via':
-        ctx.fillStyle = 'rgba(0, 100, 200, 0.8)';
-        break;
-      case 'pad':
-        ctx.fillStyle = 'rgba(200, 100, 0, 0.8)';
-        break;
-      case 'component':
-        ctx.fillStyle = 'rgba(0, 200, 100, 0.8)';
-        break;
-      case 'testpoint':
-        ctx.fillStyle = 'rgba(200, 0, 100, 0.8)';
-        break;
-      default:
-        ctx.fillStyle = 'rgba(100, 100, 100, 0.8)';
-    }
-    
-    ctx.fill();
-    ctx.strokeStyle = 'white';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  }
-}
-
-export function createMarkerPass(renderer: MarkerRenderer): RenderPass {
-  return {
-    id: "markers",
-    order: (RENDER_ORDER.MARKERS_MIN + RENDER_ORDER.MARKERS_MAX) / 2,
-    enabled: (rc: RenderCtx) => rc.visibility.markers,
-    draw: (rc) => renderer.draw(rc),
   };
 }
 
@@ -282,7 +99,7 @@ export function createSelectionPass(renderer: SelectionRenderer, getSelection: (
   return {
     id: "selection",
     order: (RENDER_ORDER.SELECTION_MIN + RENDER_ORDER.SELECTION_MAX) / 2,
-    enabled: (rc: RenderCtx) => true, // Selection is always enabled when present
+    enabled: (_rc: RenderCtx) => true, // Selection is always enabled when present
     draw: (rc) => {
       const selection = getSelection();
       if (!selection) return;

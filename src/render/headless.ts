@@ -172,3 +172,29 @@ export async function renderGerbersToImage(input: HeadlessInput, opts: ImageOpti
   const rasterize = opts.rasterizer ?? browserRasterizer;
   return rasterize(svg, { width: docs.wPx, height: docs.hPx, scale: opts.scale ?? 1 });
 }
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return typeof btoa !== "undefined" ? btoa(bin) : Buffer.from(bin, "binary").toString("base64");
+}
+
+export interface ThumbnailOptions extends ComposeOptions {
+  /** Max width/height in px. Default 256. */
+  maxSize?: number;
+  rasterizer?: SvgRasterizer;
+}
+
+/**
+ * Render a small board thumbnail as a PNG data URI (handy for file lists). The
+ * output is bounded to `maxSize` on its longest side, preserving aspect ratio.
+ */
+export async function renderGerbersThumbnail(input: HeadlessInput, opts: ThumbnailOptions = {}): Promise<string> {
+  const files = await toFiles(input);
+  const docs = await renderGerberSvgDocs(files);
+  const svg = composeStackToSvg(docs, opts);
+  const maxSize = opts.maxSize ?? 256;
+  const scale = Math.min(1, maxSize / Math.max(docs.wPx, docs.hPx, 1));
+  const bytes = await (opts.rasterizer ?? browserRasterizer)(svg, { width: docs.wPx, height: docs.hPx, scale });
+  return `data:image/png;base64,${bytesToBase64(bytes)}`;
+}

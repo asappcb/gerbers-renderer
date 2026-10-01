@@ -26,22 +26,22 @@ Designed for web apps, browser extensions, CI previews, manufacturing portals, a
 - Layer auto-detection for KiCad, Altium, Eagle, generic exports
 
 **Viewer**
-- Single-canvas 2D render pipeline (layers composited via `drawImage`)
-- Smooth pan / zoom with mouse-centered zoom
-- Top / bottom side switching
-- Per-layer visibility dropdown (on by default, toggleable)
-- Grid overlay with mm / in units
-- Marker system for DFM annotations (error / warning / info)
-- Overlay system for custom visualizations
-- Image / SVG export (current view, full board, per side)
-- Revision diff overlay (compare two Gerber sets)
-- Shareable deep-links (side + camera + visibility encoded in the URL)
-- Configurable download button
+- Single-canvas 2D render pipeline (layers composited via `drawImage`) with a crisp vector-copper overlay when zoomed in
+- Optional **3D board view** (extruded FR4 + textured copper; requires `three` as an optional peer dep)
+- Smooth pan / zoom with mouse-centered zoom, top / bottom side switching
+- Per-layer visibility dropdown; **board-finish themes** (green/blue/red/black/white/purple)
+- Grid overlay with mm / in units; cursor coordinate readout
+- **Feature inspect** (hover pads/traces/holes), **measurement tool** (snap-to-feature), **connectivity net-highlight** (click a trace → light up its net)
+- **Board stats** panel (size, layer count, pads, holes, drill sizes, min trace)
+- Marker system (spatial-indexed, with hover/select events) + overlay system for custom visualizations
+- Image / SVG export, revision diff overlay, shareable deep-links, configurable download button
 
 **Headless / CI**
 - DOM-free render to a self-contained SVG (`renderGerbersToSvg`)
-- Render to PNG via a pluggable rasterizer (`renderGerbersToImage`)
-- Revision diff for CI (`diffGerbers`)
+- Render to PNG via a pluggable rasterizer (`renderGerbersToImage`), **thumbnails** (`renderGerbersThumbnail`)
+- Off-main-thread rendering (`renderGerbersInWorker`)
+- Revision diff (`diffGerbers`) + per-layer geometry diff (`diffGeometry`)
+- **`gerbers-render` CLI** (SVG dependency-free; PNG via optional `@resvg/resvg-js`)
 
 **Library**
 - Drop-in — mounts into any DOM node
@@ -221,6 +221,53 @@ const result = await detectGerberBundle(buffer);
 if (!result.isGerber) console.log("Not a Gerber bundle:", result.reasons);
 
 // result: { isGerber, archiveType, confidence, reasons, files? }
+```
+
+## Inspection, themes & 3D
+
+```typescript
+viewer.setBoardTheme("blue");          // green | blue | red | black | white | purple
+viewer.getStats();                     // { widthMm, holeCount, drillSizesMm, minTraceWidthMm, … }
+viewer.pickFeatureAt(clientX, clientY);// nearest pad/trace/hole under the cursor
+await viewer.toggle3D();               // 3D board view (needs `three` installed)
+
+// Marker interaction
+viewer.on("select:marker", ({ markerId }) => { /* … */ });
+viewer.on("click:board", ({ x_mm, y_mm }) => { /* … */ });
+```
+
+The parsed geometry is also returned from the render for your own tooling:
+
+```typescript
+const { geometry } = await renderGerbers(buffer);
+// geometry.features: pads / traces / holes (world coords) · geometry.stats
+```
+
+## Off-thread render, thumbnails & CLI
+
+```typescript
+import { renderGerbersInWorker, renderGerbersThumbnail } from "gerbers-renderer";
+
+const result = await renderGerbersInWorker(buffer);          // parse off the main thread
+const thumb = await renderGerbersThumbnail(buffer, { maxSize: 256 }); // PNG data URI
+```
+
+```bash
+# CLI — SVG is dependency-free; PNG needs `npm i @resvg/resvg-js`
+npx gerbers-render board.zip --side top --out top.svg
+npx gerbers-render board.zip --side bottom --format png --scale 2 -o bottom.png
+```
+
+## Geometry diff
+
+```typescript
+import { diffGeometry } from "gerbers-renderer";
+
+const a = (await renderGerbers(revA)).geometry;
+const b = (await renderGerbers(revB)).geometry;
+const d = diffGeometry(a, b);
+// d.summary: { addedCount, removedCount, unchangedCount }
+// d.perLayer["cu.top"]: { added: [...], removed: [...], unchanged }
 ```
 
 ## Supported input formats

@@ -10,6 +10,8 @@ export default defineConfig({
       input: resolve(__dirname, 'demo/index.html')
     }
   },
+  // Render worker is an ES module (see vite.config.ts).
+  worker: { format: 'es' },
   // Base path for GitHub Pages
   base: process.env.NODE_ENV === 'production' ? '/gerbers-renderer/' : '/',
   server: {

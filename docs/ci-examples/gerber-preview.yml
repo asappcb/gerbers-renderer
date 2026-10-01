@@ -1,0 +1,68 @@
+# Example: render a PCB preview on every pull request and post it as a comment.
+#
+# Copy this to .github/workflows/ in your own repo and set BOARD (path to your
+# Gerber .zip). Uses the gerbers-render CLI (SVG is dependency-free; PNG needs
+# @resvg/resvg-js, installed below).
+#
+# The image is committed to an orphan `pr-previews` branch and linked from the
+# comment (GitHub renders images from raw URLs).
+
+name: Gerber preview
+
+on:
+  pull_request:
+    paths: ["hardware/**"] # adjust to where your Gerbers live
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    env:
+      BOARD: hardware/board.zip # <-- your Gerber bundle
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install renderer + rasterizer
+        run: npm i -g gerbers-renderer && npm i @resvg/resvg-js
+
+      - name: Render top & bottom PNGs
+        run: |
+          mkdir -p .preview
+          gerbers-render "$BOARD" --side top    --format png --scale 2 -o .preview/top.png
+          gerbers-render "$BOARD" --side bottom  --format png --scale 2 -o .preview/bottom.png
+
+      - name: Publish preview images to an orphan branch
+        id: publish
+        run: |
+          BRANCH="pr-previews"
+          SHA="${{ github.event.pull_request.head.sha }}"
+          git fetch origin "$BRANCH" || git checkout --orphan "$BRANCH"
+          git checkout "$BRANCH" 2>/dev/null || true
+          mkdir -p "pr-${{ github.event.number }}"
+          cp .preview/*.png "pr-${{ github.event.number }}/"
+          git add "pr-${{ github.event.number }}"
+          git -c user.name=ci -c user.email=ci@example.com commit -m "preview $SHA" || echo "no changes"
+          git push origin "$BRANCH"
+          BASE="https://raw.githubusercontent.com/${{ github.repository }}/$BRANCH/pr-${{ github.event.number }}"
+          echo "top=$BASE/top.png" >> "$GITHUB_OUTPUT"
+          echo "bottom=$BASE/bottom.png" >> "$GITHUB_OUTPUT"
+
+      - name: Comment on the PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { top, bottom } = ${{ toJSON(steps.publish.outputs) }};
+            const body = `### PCB preview\n\n**Top**\n\n![top](${top})\n\n**Bottom**\n\n![bottom](${bottom})`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
