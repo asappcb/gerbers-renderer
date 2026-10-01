@@ -43,6 +43,7 @@ function scaleGerberPrims(prims: ReturnType<typeof parseGerberFile>, s: number) 
       diameterMm: (f.diameterMm ?? 0) * s,
       widthMm: (f.widthMm ?? 0) * s,
       heightMm: (f.heightMm ?? 0) * s,
+      loops: f.loops?.map((loop) => loop.map((p) => ({ x: p.x * s, y: p.y * s }))),
     })),
     regions: prims.regions.map((r) => ({
       ...r,
@@ -67,6 +68,7 @@ function scaleGerberPrims(prims: ReturnType<typeof parseGerberFile>, s: number) 
           widthMm: op.widthMm !== undefined ? op.widthMm * s : undefined,
           heightMm: op.heightMm !== undefined ? op.heightMm * s : undefined,
           cornerMm: op.cornerMm !== undefined ? op.cornerMm * s : undefined,
+          loops: op.loops?.map((loop) => loop.map((p) => ({ x: p.x * s, y: p.y * s }))),
         };
       }
       // region
@@ -90,6 +92,17 @@ function scaleSlots(slots: DrillSlot[], s: number): DrillSlot[] {
     x2: sl.x2 * s, y2: sl.y2 * s,
     diameter: (sl.diameter ?? 0) * s,
   }));
+}
+
+function loopToPathD(loop: Array<{ x: number; y: number }>, toPx: (x: number, y: number) => { x: number; y: number }): string {
+  return (
+    loop
+      .map((pt, i) => {
+        const q = toPx(pt.x, pt.y);
+        return `${i === 0 ? "M" : "L"} ${q.x.toFixed(2)} ${q.y.toFixed(2)}`;
+      })
+      .join(" ") + " Z"
+  );
 }
 
 function svgToBlobUrl(svg: string): string {
@@ -121,6 +134,10 @@ function boundsFromGerber(prims: ReturnType<typeof parseGerberFile>): BoundsMm {
   }
 
   for (const f of prims.flashes) {
+    if (f.loops) {
+      for (const loop of f.loops) for (const p of loop) expandBounds(b, p.x, p.y);
+      continue;
+    }
     const w = (f.widthMm ?? f.diameterMm) || 0;
     const h = (f.heightMm ?? f.diameterMm) || 0;
     expandBounds(b, f.position.x - w / 2, f.position.y - h / 2);
@@ -461,6 +478,14 @@ function buildLayerSvgWithPolarityMask(
     }
     
     if (op.kind === "flash") {
+      // Macro aperture: draw its evaluated primitives. One path per primitive
+      // so overlapping primitives union instead of cancelling.
+      if (op.loops) {
+        return op.loops
+          .map((loop: any) => `<path d="${loopToPathD(loop, toPx)}" fill="${paintColor}" fill-opacity="1" />`)
+          .join("");
+      }
+
       const p = toPx(op.position.x, op.position.y);
       const fwMm = (op.widthMm ?? op.diameterMm ?? 0.8);
       const fhMm = (op.heightMm ?? op.diameterMm ?? 0.8);
@@ -564,6 +589,14 @@ function buildSilkSvg(prims: ReturnType<typeof parseGerberFile>, bounds: BoundsM
   });
 
   const flashEls = prims.flashes.map((f) => {
+    if (f.loops) {
+      const toPx = (x: number, y: number) => {
+        const q = toLocalMm(x, y, bounds);
+        return { x: q.x * pxPerMm, y: q.y * pxPerMm };
+      };
+      return f.loops.map((loop) => `<path d="${loopToPathD(loop, toPx)}" fill="${fill}" />`).join("");
+    }
+
     const p = toLocalMm(f.position.x, f.position.y, bounds);
     const cx = p.x * pxPerMm;
     const cy = p.y * pxPerMm;
