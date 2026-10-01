@@ -52,8 +52,9 @@ export async function renderGerbersInWorker(input: WorkerInput): Promise<RenderR
   }
 
   const id = ++seq;
-  // Structured-clone the input (don't transfer) so the caller keeps its buffer.
-  const payload = input instanceof Uint8Array ? input.buffer.slice(0) : input;
+  // Copy (don't transfer) so the caller keeps its buffer. Copy only the view's
+  // bytes: a subarray or Node Buffer can sit at an offset in a larger buffer.
+  const payload = input instanceof Uint8Array ? input.slice().buffer : input;
 
   const docs = await new Promise<SvgRenderResult>((resolve, reject) => {
     pending.set(id, { resolve, reject });
