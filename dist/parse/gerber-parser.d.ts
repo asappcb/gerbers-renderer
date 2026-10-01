@@ -21,6 +21,7 @@ export type Op = {
     heightMm?: number;
     cornerMm?: number;
     rotationDeg?: number;
+    loops?: Vec2[][];
 } | {
     kind: "region";
     polarity: Polarity;
@@ -48,6 +49,8 @@ export interface GerberPrimitiveFlash {
     cornerMm?: number;
     rotationDeg?: number;
     polarity: Polarity;
+    /** Macro apertures: the evaluated shape as absolute polygons (mm), already rotated and placed. */
+    loops?: Vec2[][];
 }
 export interface GerberPrimitiveRegion {
     loops: Vec2[][];
