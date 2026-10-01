@@ -2,6 +2,7 @@
 
 import type { Vec2 } from "../types/pcb-model";
 import type { LayerRole } from "../io/file-classifier";
+import { evaluateMacro, parseMacroDefinition, rotateLoop, type MacroStatement } from "./aperture-macro";
 
 /**
  * Primitive types used by the geometry pipeline. These are what
@@ -12,7 +13,7 @@ export type Polarity = "dark" | "clear";
 
 export type Op =
   | { kind: "track"; polarity: Polarity; start: Vec2; end: Vec2; widthMm: number }
-  | { kind: "flash"; polarity: Polarity; position: Vec2; diameterMm: number; shape: string; widthMm?: number; heightMm?: number; cornerMm?: number; rotationDeg?: number }
+  | { kind: "flash"; polarity: Polarity; position: Vec2; diameterMm: number; shape: string; widthMm?: number; heightMm?: number; cornerMm?: number; rotationDeg?: number; loops?: Vec2[][] }
   | { kind: "region"; polarity: Polarity; loops: Vec2[][] };
 
 export interface GerberPrimitiveTrack {
@@ -39,6 +40,8 @@ export interface GerberPrimitiveFlash {
   cornerMm?: number;     // for R / O
   rotationDeg?: number;  // pad rotation in degrees
   polarity: Polarity;
+  /** Macro apertures: the evaluated shape as absolute polygons (mm), already rotated and placed. */
+  loops?: Vec2[][];
 }
 
 const DEFAULT_FLASH_DIAM_MM = 0.8; // fallback if aperture has no size
@@ -71,6 +74,8 @@ interface Aperture {
   cornerMm?: number;
   macroName?: string;
   rotationDeg?: number;  // pad rotation in degrees
+  /** Evaluated macro shape in aperture-local mm, when the macro was defined via %AM. */
+  macroLoops?: Vec2[][];
 }
 
 export interface GerberPrimitiveFlash {
@@ -94,6 +99,9 @@ interface ParserState {
 
   apertures: Map<number, Aperture>;
   currentAperture: Aperture | null;
+
+  // Aperture macro definitions from %AM blocks, by name
+  macros: Map<string, MacroStatement[]>;
 
   // Arc interpolation mode: 1=linear (G01), 2=CW arc (G02), 3=CCW arc (G03)
   arcMode: 1 | 2 | 3;
@@ -142,6 +150,7 @@ export function parseGerberFile(
     y: 0,
     apertures: new Map(),
     currentAperture: null,
+    macros: new Map(),
     arcMode: 1,
     loadRotationDeg: 0,
     inRegion: false,
@@ -157,16 +166,32 @@ export function parseGerberFile(
 
   const lines = content.split(/\r?\n/);
 
+  // A parameter block can span lines (%AM macros always do in KiCad output).
+  let pendingBlock: string | null = null;
+
   for (const rawLine of lines) {
     let line = rawLine.trim();
     if (!line) continue;
+
+    if (pendingBlock !== null) {
+      pendingBlock += line;
+      if (line.endsWith("%")) {
+        handleParameterBlock(pendingBlock, state);
+        pendingBlock = null;
+      }
+      continue;
+    }
 
     // Comments
     if (line.startsWith("G04")) continue;
 
     // Parameter block: % ... *%
-    if (line.startsWith("%") && line.endsWith("%")) {
-      handleParameterBlock(line, state);
+    if (line.startsWith("%")) {
+      if (line.length > 1 && line.endsWith("%")) {
+        handleParameterBlock(line, state);
+      } else {
+        pendingBlock = line;
+      }
       continue;
     }
 
@@ -258,6 +283,7 @@ function handleParameterBlock(block: string, state: ParserState) {
         if (ap.diameterMm !== undefined) ap.diameterMm *= factor;
         if (ap.widthMm !== undefined) ap.widthMm *= factor;
         if (ap.heightMm !== undefined) ap.heightMm *= factor;
+        if (ap.macroLoops) ap.macroLoops = ap.macroLoops.map((l) => l.map((p) => ({ x: p.x * factor, y: p.y * factor })));
       }
 
       state.unitScale = newScale;
@@ -265,14 +291,48 @@ function handleParameterBlock(block: string, state: ParserState) {
     return;
   }
 
+  if (body.startsWith("AM")) {
+    const def = parseMacroDefinition(body);
+    if (def) state.macros.set(def.name, def.statements);
+    return;
+  }
+
   if (body.startsWith("AD")) {
     // Supports both standard shapes (C/R/O/P) and macro names (ROUNDRECT, RRECT, etc)
-    const m = /AD(D?)(\d+)([A-Za-z_.$][A-Za-z0-9_.$]*),?([0-9.Xx]*)/.exec(body);
+    const m = /AD(D?)(\d+)([A-Za-z_.$][A-Za-z0-9_.$]*),?(.*)$/.exec(body);
     if (!m) return;
 
     const code = parseInt(m[2], 10);
     const shape = m[3]; // do not narrow here
     const params = m[4] ?? "";
+
+    const macro = state.macros.get(shape);
+    if (macro) {
+      const values = params.split(/[Xx]/).filter(Boolean).map((v) => parseFloat(v));
+      const macroLoops = evaluateMacro(macro, values, state.unitScale);
+      const ap: Aperture = { code, shape, macroName: shape, macroLoops };
+      if (macroLoops.length) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const loop of macroLoops) for (const p of loop) {
+          minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
+          minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
+        }
+        // Symmetric extents about the flash point, so width/height-based
+        // consumers (bounds, effective diameter) cover the whole shape.
+        ap.widthMm = 2 * Math.max(Math.abs(minX), Math.abs(maxX));
+        ap.heightMm = 2 * Math.max(Math.abs(minY), Math.abs(maxY));
+        ap.diameterMm = Math.min(ap.widthMm, ap.heightMm);
+      }
+      state.apertures.set(code, ap);
+      return;
+    }
+
+    // A macro name with no %AM definition: keep the old best-effort reading
+    // (leading unsigned numbers as width/height) rather than feed it corner
+    // coordinates as sizes.
+    const sizeParams = (shape === "C" || shape === "R" || shape === "O" || shape === "P")
+      ? params
+      : (/^[0-9.Xx]*/.exec(params)?.[0] ?? "");
 
     let diameterMm: number | undefined;
     let widthMm: number | undefined;
@@ -280,8 +340,8 @@ function handleParameterBlock(block: string, state: ParserState) {
     let cornerMm: number | undefined;
     let rotationDeg: number | undefined;
 
-    if (params) {
-      const parts = params.split(/[Xx]/).filter(Boolean);
+    if (sizeParams) {
+      const parts = sizeParams.split(/[Xx]/).filter(Boolean);
       const sizeXmm = parts[0] ? parseFloat(parts[0]) * state.unitScale : undefined;
       const sizeYmm = parts[1] ? parseFloat(parts[1]) * state.unitScale : undefined;
       const sizeRmm = parts[2] ? parseFloat(parts[2]) * state.unitScale : undefined;
@@ -596,6 +656,13 @@ function handleCommandLine(line: string, state: ParserState) {
       if (ap.heightMm !== undefined) flash.heightMm = ap.heightMm;
       if (ap.cornerMm !== undefined) flash.cornerMm = ap.cornerMm;
 
+      // Macro apertures carry their real shape. Load rotation (%LR) applies;
+      // the aperture's own rotation is already part of the macro geometry.
+      const loops = ap.macroLoops?.map((l) =>
+        rotateLoop(l, state.loadRotationDeg).map((p) => ({ x: p.x + newX, y: p.y + newY }))
+      );
+      if (loops) flash.loops = loops;
+
       state.flashes.push(flash);
 
       // Record ordered operation
@@ -609,6 +676,7 @@ function handleCommandLine(line: string, state: ParserState) {
         heightMm: ap.heightMm,
         cornerMm: ap.cornerMm,
         rotationDeg,
+        loops,
       });
     }
     state.x = newX;
