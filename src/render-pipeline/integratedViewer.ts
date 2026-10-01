@@ -330,6 +330,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   let didInteract = false;
   // Ids of layer passes registered on the last updateRenderPasses() (for teardown).
   let registeredLayerPassIds: string[] = [];
+  // Ids of the per-copper-layer crisp vector passes (kept out of the layer panel).
+  let registeredVectorPassIds: string[] = [];
   // When set, isolate a single copper layer (index into stackup.copper) — the
   // layer-stepper "traverse" mode. null = normal current-side view.
   let soloIndex: number | null = null;
@@ -498,6 +500,8 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     // Remove the layer passes registered on the previous pass build.
     registeredLayerPassIds.forEach((id) => viewer.removePass(id));
     registeredLayerPassIds = [];
+    registeredVectorPassIds.forEach((id) => viewer.removePass(id));
+    registeredVectorPassIds = [];
 
     if (!boardGeom || !stackup) return;
 
@@ -514,6 +518,13 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
       if (!(id in layerVisible)) layerVisible[id] = !isInnerId(id);
       const pass = fr4 ? createFR4Pass(id, order) : createImagePass(id, order, url);
       if (pass) { viewer.addPass(pass); registeredLayerPassIds.push(id); }
+      // Crisp vector copper sits directly over its own raster, so it is never
+      // buried under another layer (inner copper, traverse mode).
+      if (pass && isCopperId(id)) {
+        const vpass = createVectorCopperPass(id, order + 0.5);
+        viewer.addPass(vpass);
+        registeredVectorPassIds.push(vpass.id);
+      }
     };
 
     // Traverse mode: isolate a single copper layer (ignores side/reveal state).
@@ -821,20 +832,24 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
 
   // --- 3D view (B3, optional three.js peer dep) ---
   let board3d: Board3DHandle | null = null;
+  function close3D() {
+    board3d?.dispose();
+    board3d = null;
+    canvas.style.display = "";
+    view3dBtn.classList.remove("active");
+  }
   async function toggle3D() {
-    if (board3d) {
-      board3d.dispose();
-      board3d = null;
-      canvas.style.display = "";
-      view3dBtn.classList.remove("active");
-      return;
-    }
+    if (board3d) { close3D(); return; }
     if (!boardGeom || !stackup) return;
+    const forBoard = boardGeom;
     view3dBtn.disabled = true;
     try {
       const { createBoard3D } = await import("./board3d");
       canvas.style.display = "none";
-      board3d = await createBoard3D(viewport, { boardGeom, stackup, substrateColor });
+      const handle = await createBoard3D(viewport, { boardGeom, stackup, substrateColor });
+      // A new board was loaded while the 3D view was building: drop the stale one.
+      if (boardGeom !== forBoard) { handle.dispose(); canvas.style.display = ""; return; }
+      board3d = handle;
       view3dBtn.classList.add("active");
     } catch (err) {
       console.error("3D view unavailable (is `three` installed?):", err);
@@ -957,8 +972,13 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     buildFeatureIndex();
     netFeatureIds = null;
     clearMeasure();
+    // A new board starts in the normal view: no layer stepping, no stale 3D
+    // view of the previous board, inner copper hidden again.
+    soloIndex = null;
+    if (board3d) close3D();
     // Prefer the first-class stackup; derive one from legacy flat layers otherwise.
     stackup = data.stackup ?? deriveStackup(data.layers);
+    resetInnerVisibility();
 
     // Set board bounds for proper coordinate system using true Gerber-space bounds
     if (boardGeom?.board?.mm_bounds) {
@@ -1317,12 +1337,25 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
     return Math.hypot(x - f.x_mm, y - f.y_mm) <= f.diameter_mm / 2 + 0.01;
   }
 
+  // Everything that could touch `f`. Query points run the whole length of a
+  // trace (not just its ends), and the radius covers the gap to the nearest
+  // indexed point of any neighbour: its centre, or a trace sample.
+  const NET_QUERY_STEP = 1; // mm between query points along a trace
   function candidatesAround(f: BoardFeature): Set<string> {
-    const pts: [number, number][] = f.kind === "trace"
-      ? [[f.x1_mm, f.y1_mm], [f.x2_mm, f.y2_mm], [(f.x1_mm + f.x2_mm) / 2, (f.y1_mm + f.y2_mm) / 2]]
-      : [[f.x_mm, f.y_mm]];
+    const pts: [number, number][] = [];
+    if (f.kind === "trace") {
+      const len = Math.hypot(f.x2_mm - f.x1_mm, f.y2_mm - f.y1_mm);
+      const n = Math.max(1, Math.ceil(len / NET_QUERY_STEP));
+      for (let k = 0; k <= n; k++) {
+        const t = k / n;
+        pts.push([f.x1_mm + (f.x2_mm - f.x1_mm) * t, f.y1_mm + (f.y2_mm - f.y1_mm) * t]);
+      }
+    } else {
+      pts.push([f.x_mm, f.y_mm]);
+    }
+    const reach = NET_QUERY_STEP / 2 + featureReach() + featRadius(f) + NET_TOL;
     const out = new Set<string>();
-    for (const [x, y] of pts) for (const id of featureIndex.queryRadius(x, y, 2)) out.add(id);
+    for (const [x, y] of pts) for (const id of featureIndex.queryRadius(x, y, reach)) out.add(id);
     return out;
   }
 
@@ -1344,7 +1377,7 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
       for (const cid of cands) {
         const hole = featureById.get(cid);
         if (hole?.kind !== "hole" || !ffContains(f, hole.x_mm, hole.y_mm)) continue;
-        for (const oid of featureIndex.queryRadius(hole.x_mm, hole.y_mm, 2)) {
+        for (const oid of featureIndex.queryRadius(hole.x_mm, hole.y_mm, featureReach())) {
           if (net.has(oid)) continue;
           const of = featureById.get(oid);
           if (!of || of.kind === "hole") continue;
@@ -1394,45 +1427,48 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   function copperColorFor(layerId: string): string {
     return stackup?.copper.find((c) => c.id === layerId)?.color ?? "#fbbf24";
   }
-  const vectorCopperPass = {
-    id: "vector-copper",
-    order: 12, // over the copper raster, under mask/silk/drills
-    enabled: (rc: RenderCtx) => !!geometry && rc.xform.getCamera().zoom > CRISP_ZOOM,
-    draw: (rc: RenderCtx) => {
-      if (!geometry) return;
-      const active = activeCopperLayerIds();
-      const m = rc.xform.getWorldToScreenMatrix();
-      const ctx = rc.ctx;
-      ctx.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
-      ctx.lineCap = "round";
-      let curColor = "";
-      for (const f of geometry.features) {
-        if (f.kind === "hole" || !active.has(f.layer)) continue;
-        const color = copperColorFor(f.layer);
-        if (color !== curColor) { ctx.fillStyle = color; ctx.strokeStyle = color; curColor = color; }
-        if (f.kind === "pad") {
-          if (f.shape === "C") {
-            ctx.beginPath();
-            ctx.arc(f.x_mm, f.y_mm, Math.max(f.w_mm, f.h_mm) / 2, 0, Math.PI * 2);
-            ctx.fill();
-          } else if (f.shape === "O" && typeof (ctx as any).roundRect === "function") {
-            ctx.beginPath();
-            (ctx as any).roundRect(f.x_mm - f.w_mm / 2, f.y_mm - f.h_mm / 2, f.w_mm, f.h_mm, Math.min(f.w_mm, f.h_mm) / 2);
-            ctx.fill();
+  const isCopperId = (id: string) => !!stackup?.copper.some((c) => c.id === id);
+
+  function createVectorCopperPass(layerId: string, order: number) {
+    return {
+      id: `vector-copper:${layerId}`,
+      order,
+      enabled: (rc: RenderCtx) =>
+        !!geometry && rc.xform.getCamera().zoom > CRISP_ZOOM && activeCopperLayerIds().has(layerId),
+      draw: (rc: RenderCtx) => {
+        if (!geometry) return;
+        const m = rc.xform.getWorldToScreenMatrix();
+        const ctx = rc.ctx;
+        ctx.setTransform(m[0], m[3], m[1], m[4], m[2], m[5]);
+        ctx.lineCap = "round";
+        const color = copperColorFor(layerId);
+        ctx.fillStyle = color;
+        ctx.strokeStyle = color;
+        for (const f of geometry.features) {
+          if (f.kind === "hole" || f.layer !== layerId) continue;
+          if (f.kind === "pad") {
+            if (f.shape === "C") {
+              ctx.beginPath();
+              ctx.arc(f.x_mm, f.y_mm, Math.max(f.w_mm, f.h_mm) / 2, 0, Math.PI * 2);
+              ctx.fill();
+            } else if (f.shape === "O" && typeof (ctx as any).roundRect === "function") {
+              ctx.beginPath();
+              (ctx as any).roundRect(f.x_mm - f.w_mm / 2, f.y_mm - f.h_mm / 2, f.w_mm, f.h_mm, Math.min(f.w_mm, f.h_mm) / 2);
+              ctx.fill();
+            } else {
+              ctx.fillRect(f.x_mm - f.w_mm / 2, f.y_mm - f.h_mm / 2, f.w_mm, f.h_mm);
+            }
           } else {
-            ctx.fillRect(f.x_mm - f.w_mm / 2, f.y_mm - f.h_mm / 2, f.w_mm, f.h_mm);
+            ctx.lineWidth = f.width_mm;
+            ctx.beginPath();
+            ctx.moveTo(f.x1_mm, f.y1_mm);
+            ctx.lineTo(f.x2_mm, f.y2_mm);
+            ctx.stroke();
           }
-        } else {
-          ctx.lineWidth = f.width_mm;
-          ctx.beginPath();
-          ctx.moveTo(f.x1_mm, f.y1_mm);
-          ctx.lineTo(f.x2_mm, f.y2_mm);
-          ctx.stroke();
         }
-      }
-    },
-  };
-  viewer.addPass(vectorCopperPass);
+      },
+    };
+  }
 
   // --- Revision diff overlay (M4) ---
 
@@ -1515,22 +1551,30 @@ export function createIntegratedViewer(host: HTMLElement, opts: IntegratedViewer
   // --- Board feature index (pads / holes / traces) for inspect / measure / net (C) ---
 
   const featureIndex = new UniformGridIndex(5);
+  const FEATURE_INDEX_STEP = 3; // mm between indexed samples along a trace
   const featureById = new Map<string, BoardFeature>();
+
+  // Largest feature radius on the board, for neighbour searches.
+  let maxFeatureRadius = 0;
+  // How far a feature's surface can be from its nearest indexed point.
+  const featureReach = () => FEATURE_INDEX_STEP / 2 + maxFeatureRadius;
 
   function buildFeatureIndex() {
     featureIndex.clear();
     featureById.clear();
+    maxFeatureRadius = 0;
     if (!geometry) return;
     geometry.features.forEach((f, i) => {
       const id = `f${i}`;
       featureById.set(id, f);
+      maxFeatureRadius = Math.max(maxFeatureRadius, featRadius(f));
       if (f.kind === "pad" || f.kind === "hole") {
         featureIndex.insert(id, f.x_mm, f.y_mm);
       } else {
         // Sample points along the segment (~every 3mm) so mid-segment picks hit,
         // not just picks that land on an endpoint/midpoint.
         const len = Math.hypot(f.x2_mm - f.x1_mm, f.y2_mm - f.y1_mm);
-        const n = Math.max(1, Math.ceil(len / 3));
+        const n = Math.max(1, Math.ceil(len / FEATURE_INDEX_STEP));
         for (let k = 0; k <= n; k++) {
           const t = k / n;
           featureIndex.insert(id, f.x1_mm + (f.x2_mm - f.x1_mm) * t, f.y1_mm + (f.y2_mm - f.y1_mm) * t);
